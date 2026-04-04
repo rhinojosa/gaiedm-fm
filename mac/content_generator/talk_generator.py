@@ -1,30 +1,25 @@
 #!/usr/bin/env python3
 """
-WRIT-FM Talk Segment Generator
+Deep House Radio — DJ Dialogue Generator
 
-Generates long-form talk show content for the talk-first radio format.
+Generates short DJ interjections for the music-first radio format.
 Uses Claude CLI for scripts and Kokoro TTS for rendering.
 
-Segment types:
-  Long-form (primary content, 1500-3000 words):
-    deep_dive       - Extended single-topic exploration
-    news_analysis   - Current events through late-night lens (uses RSS headlines)
-    interview       - Simulated interview with historical/fictional figure
-    panel           - Two hosts discuss topic from different angles
-    story           - Narrative storytelling, true stories from music/culture
-    listener_mailbag - Invented listener letters + responses
-    music_essay     - Extended essay on artist/album/genre
-
-  Short-form (transitions):
-    station_id      - 15-30 word station identification
-    show_intro      - 80-150 word show opening
-    show_outro      - 60-120 word show closing
+Segment types (all short-form, 30-250 words):
+    track_intro      - Track ID or "coming up next..." (15-30s)
+    set_intro        - Show opening, vibe setting (30-60s)
+    set_outro        - Show closing, what's next (20-40s)
+    festival_update  - Festival/event news (45-90s)
+    artist_spotlight  - Artist feature, label news (60-120s)
+    anthem_announce  - Anthem introduction with context (15-30s)
+    station_id       - Quick station identification (10-15s)
 
 Usage:
     uv run python talk_generator.py                                # Current show
-    uv run python talk_generator.py --show midnight_signal --count 5
-    uv run python talk_generator.py --type deep_dive --topic "why vinyl matters"
-    uv run python talk_generator.py --all --count 3                # 3 per show
+    uv run python talk_generator.py --show the_deep --count 5
+    uv run python talk_generator.py --type festival_update
+    uv run python talk_generator.py --all --count 3
+    uv run python talk_generator.py --status
 """
 
 from __future__ import annotations
@@ -60,84 +55,71 @@ from persona import HOSTS, get_host, build_host_prompt, STATION_NAME
 # =============================================================================
 
 SEGMENT_WORD_TARGETS = {
-    # Long-form
-    "deep_dive": (1500, 2500),
-    "news_analysis": (1500, 2000),
-    "interview": (2000, 3000),
-    "panel": (2000, 3000),
-    "story": (1500, 2500),
-    "listener_mailbag": (1500, 2000),
-    "music_essay": (1500, 2500),
-    # Short-form
+    "track_intro": (30, 60),
+    "set_intro": (60, 120),
+    "set_outro": (50, 100),
+    "festival_update": (100, 200),
+    "artist_spotlight": (120, 250),
+    "anthem_announce": (30, 60),
     "station_id": (15, 30),
-    "show_intro": (80, 150),
-    "show_outro": (60, 120),
 }
 
 SEGMENT_PROMPTS = {
-    "deep_dive": """Write an extended exploration of this topic. Go deep.
-Build your central idea through stories, examples, tangents.
-Let one thought lead naturally to another. Circle back to earlier threads.
-Include specific details: years, names, places when relevant.
-Structure: open with a hook, develop through 3-4 connected ideas, land somewhere unexpected.
-Use [pause] for natural rhythm. Output ONLY the spoken words.""",
+    "track_intro": """Write a brief DJ interjection identifying a track or teasing what's coming.
+Keep it natural — like a DJ talking between tracks in a club.
+Reference the artist, track name, label, or a specific detail about the song.
+Be specific: mention a remix, a release year, a set where this track was played.
+30-60 words max. Output ONLY the spoken words.""",
 
-    "news_analysis": """Analyze these headlines through a late-night lens.
-Don't just report - interpret. What patterns do you see? What's being missed?
-Connect current events to deeper themes. Ask the questions daytime anchors don't.
-Be thoughtful, not reactive. Skeptical but not cynical.
+    "set_intro": """Write a show opening for the DJ set.
+Set the mood — what time is it, what's the energy, what should listeners expect.
+Reference the genre/vibe naturally. Mention 1-2 artists or tracks coming up.
+Keep it conversational, not scripted. Like opening a club night.
+60-120 words. Output ONLY the spoken words.""",
 
-HEADLINES:
-{headlines}
+    "set_outro": """Write a set closing.
+Thank the listeners. Reference what was played. Tease what's coming next.
+Keep the energy appropriate to the show vibe.
+50-100 words. Output ONLY the spoken words.""",
 
-Use [pause] for natural rhythm. Output ONLY the spoken words.""",
+    "festival_update": """Write a brief festival/events update for the electronic music world.
+Reference real festivals, venues, scenes, and events:
+- Festivals: Tomorrowland, Ultra Miami, ADE (Amsterdam Dance Event), Creamfields, EDC, Burning Man, Coachella, Printworks, Fabric
+- Scenes: Ibiza, Berlin, Amsterdam, Miami, Tulum, London, Barcelona
+- Events: label nights, B2B sets, album launches, tour announcements
 
-    "interview": """Write a simulated interview where you (the host) talk with {guest_name}.
-Format with HOST: and GUEST: markers on separate lines.
-The guest is a fictional/composite character, not a real living person being impersonated.
-The conversation should feel natural - interruptions, tangents, moments of surprise.
-Build to genuine insight or revelation.
-Use [pause] for natural rhythm. Output ONLY the spoken dialogue.""",
+Talk about what's happening in the scene: upcoming festivals, memorable sets from recent events,
+new venue openings, artist tour announcements, label showcases.
+Be enthusiastic but informed. Like an insider sharing news with fellow fans.
+100-200 words. Output ONLY the spoken words.""",
 
-    "panel": """Write a discussion between two hosts on this topic.
-Format with HOST_A: and HOST_B: markers on separate lines.
-They have different perspectives but mutual respect.
-The conversation should build - start with disagreement, find nuance, reach unexpected common ground.
-Include moments of genuine surprise and humor.
-Use [pause] for natural rhythm. Output ONLY the spoken dialogue.""",
+    "artist_spotlight": """Write a brief artist or label spotlight.
+Pick from these artists/labels and go deep on one:
 
-    "story": """Tell a story. It can be true, apocryphal, or mythological - but tell it like it happened.
-Good stories have specific details: the color of the room, the year, the weather.
-Build tension. Let the listener wonder where this is going.
-The ending should reframe everything that came before.
-Use [pause] for dramatic effect. Output ONLY the spoken words.""",
+ANJUNADEEP FAMILY: Lane 8, Ben Böhmer, Yotto, Tinlicker, Rufus Du Sol, Nora En Pure,
+Eli & Fur, Marsh, Jody Wisternoff, Luttrell, CRi, During, Oliver Smith
 
-    "listener_mailbag": """Write a segment responding to invented listener messages.
-Create 2-3 messages from listeners (with first names and cities).
-Each message should touch on something real - a memory, a question, a feeling.
-Respond to each with genuine warmth and thoughtfulness.
-Format: read the message, then respond. Natural transitions between letters.
-Use [pause] for natural rhythm. Output ONLY the spoken words.""",
+PROGRESSIVE: John Digweed, Sasha, Deep Dish, Hernan Cattaneo, Guy J, Henry Saiz,
+Nick Warren, Eelke Kleijn, Patrice Baumel, Jeremy Olander, Cid Inc
 
-    "music_essay": """Write an extended essay about music.
-This is not a review. It's a love letter, an excavation, a meditation.
-Pick a specific angle: a single song, a studio, a year, a collaboration, a genre's birth.
-Use vivid, sensory language. Make the listener hear what you're describing.
-Be specific with details but universal with feeling.
-Use [pause] for natural rhythm. Output ONLY the spoken words.""",
+PEAK TIME: Eric Prydz/Pryda/Cirez D, Deadmau5, Above & Beyond, CamelPhat, Artbat,
+Boris Brejcha, Maceo Plex, Stephan Bodzin, Tale Of Us, Anyma, Solomun
 
-    "station_id": """Write a 15-30 word station ID for WRIT-FM.
-Be cryptic but warm. Reference the frequency, the signal, the persistence of broadcasting.
-Output ONLY the spoken text. No quotes, headers, or explanations.""",
+LABELS: Anjunadeep, Bedrock, Yoshitoshi, Last Night on Earth, Sudbeat, Diynamic,
+Innervisions, mau5trap, Afterlife, Kompakt
 
-    "show_intro": """Write an 80-150 word opening for the show.
-Welcome listeners. Set the mood. Hint at what's ahead without being specific.
-Ground the listener in time and space - what hour is it, what kind of night.
-Output ONLY the spoken text.""",
+Share a specific detail: a legendary set, a breakthrough track, their production style,
+a collaboration, their journey. Make it personal, not Wikipedia.
+120-250 words. Output ONLY the spoken words.""",
 
-    "show_outro": """Write a 60-120 word show closing.
-Thank the listener for staying. Acknowledge the time spent together.
-Hint at what's next on the station. Leave them with something to carry.
+    "anthem_announce": """Write a brief anthem introduction.
+You're about to play a track that everyone knows — a track that defines moments.
+Build a tiny bit of anticipation. Reference where this track has been played,
+what it means to the scene, why it's an anthem.
+Be reverent but not cheesy. 30-60 words. Output ONLY the spoken words.""",
+
+    "station_id": """Write a 15-30 word station ID for Deep House Radio.
+Reference the music, the frequency, the vibe. Keep it smooth and brief.
 Output ONLY the spoken text.""",
 }
 
@@ -146,120 +128,85 @@ Output ONLY the spoken text.""",
 # =============================================================================
 
 TOPIC_POOLS = {
-    "philosophy": [
-        "The 3am mind - why we think differently in darkness",
-        "Alone together - the paradox of mass media intimacy",
-        "The archaeology of memory - how songs excavate the past",
-        "Waiting rooms of the soul - the liminal spaces we inhabit",
-        "The democracy of insomnia - who else is awake right now",
-        "Time as texture - why some hours feel longer than others",
-        "The comfort of routine - rituals that hold us together",
-        "Nostalgia as navigation - using the past to find the future",
-        "The weight of small things - objects that carry meaning",
-        "Silence as sound - what we hear when nothing plays",
-        "The myth of productivity - what we lose when everything must be useful",
-        "Boredom as portal - what happens when we stop filling every moment",
-        "The loneliness of crowds versus the company of solitude",
-        "Why we tell stories to strangers in the dark",
-        "The philosophy of night shifts - what the invisible economy teaches us",
+    "melodic_house": [
+        "Anjunadeep and the rise of melodic house",
+        "Lane 8's This Never Happened concept — no phones, pure music",
+        "Ben Böhmer's live streams from hot air balloons and mountaintops",
+        "Yotto's dark melodic style and his Odd One Out label",
+        "Tinlicker and the art of the vocal progressive track",
+        "Rufus Du Sol's journey from Sydney to the world",
+        "The Anjunadeep Explorations compilations and why they matter",
+        "Nora En Pure and the Purified concept",
+        "Eli & Fur's evolution from DJs to producers",
+        "Jody Wisternoff's 30 years in electronic music",
+        "The art of the sunrise set — when deep house meets dawn",
+        "Marsh and the new wave of Anjunadeep artists",
+        "Why melodic house works on both headphones and dancefloors",
+        "The label that changed everything: Anjunadeep's first 500 releases",
+        "Terrace culture and the architecture of the outdoor set",
     ],
-    "music_history": [
-        "The secret history of the B-side - when the throwaway becomes the classic",
-        "How geography shaped sound - the cities that invented genres",
-        "The lost art of the album sequence - why track order matters",
-        "Recording studios as instruments - rooms that shaped decades of music",
-        "The sample and the sampled - how old records live in new ones",
-        "One-hit wonders who deserved more - careers that should have been",
-        "The technology of music - from wax cylinders to streaming algorithms",
-        "Regional scenes that never crossed over - local sounds lost to time",
-        "Pirate radio - outlaws of the airwaves and the sounds they set free",
-        "The golden age of the record shop - archaeology for the ears",
-        "How jazz escaped from New Orleans and conquered the world",
-        "The birth of electronic music - when machines learned to feel",
-        "Ethiopian jazz and the sound of a country's golden age",
-        "The DJ as curator - the art of selection and sequence",
-        "Vinyl mastering - the physics of grooves and the art of the cut",
+    "progressive_house": [
+        "Sasha & Digweed's Northern Exposure — the mix that defined a generation",
+        "Bedrock Records and the sound of progressive house",
+        "Deep Dish and the Washington DC progressive sound",
+        "Hernan Cattaneo's Resident podcast — 20 years of progressive",
+        "Guy J and the art of the 8-hour set",
+        "The Global Underground series — a city, a DJ, a moment in time",
+        "Yoshitoshi Records and the Deep Dish legacy",
+        "Last Night on Earth — Sasha's label and vision",
+        "The Sudbeat sound and the Buenos Aires scene",
+        "Nick Warren's Way Out West and the Bristol connection",
+        "The art of the marathon DJ set — endurance as art form",
+        "Henry Saiz and the Spanish progressive scene",
+        "Eelke Kleijn's cinematic approach to progressive house",
+        "The progressive house revival — what changed and what stayed the same",
+        "John Digweed's Transitions — the longest running DJ show",
     ],
-    "current_events": [
-        "What the headlines aren't telling you this week",
-        "The economy of attention - who benefits when we're distracted",
-        "Technology and trust - the crisis nobody's naming",
-        "The changing shape of cities after midnight",
-        "Climate reports and the language of urgency",
-        "The state of journalism at the end of the world",
-        "Immigration stories that don't fit the narrative",
-        "The education system as a mirror of what we value",
-        "Healthcare access and the geography of survival",
-        "The gig economy and the myth of freedom",
+    "anthems": [
+        "Eric Prydz's Opus — the 9 minutes that changed festival closings forever",
+        "Deadmau5's Strobe — why a 10-minute track became the definitive anthem",
+        "Above & Beyond's Sun & Moon — the track that makes festivals cry",
+        "The history of the festival anthem — from Tiesto to Prydz",
+        "CamelPhat's Cola — from underground to main stage",
+        "Stephan Bodzin's Powers of Ten — techno meets transcendence",
+        "The art of the closing track — how DJs choose the last song",
+        "Sasha's Xpander — the track that defined late 90s progressive",
+        "Deep Dish's Flashdance — the anthem that built a legacy",
+        "Artbat's rise from Ukraine to headlining Afterlife",
+        "Boris Brejcha and the invention of high-tech minimal",
+        "Tale Of Us and the Afterlife movement",
+        "Anyma and the future of audio-visual electronic music",
+        "Pryda vs Cirez D — Eric Prydz's two musical personalities",
+        "Tomorrowland's greatest ever closing sets",
     ],
-    "culture": [
-        "The coffee shop as third place - where strangers become regulars",
-        "Night shift workers - the invisible economy that keeps everything running",
-        "The last video stores - temples to a dying format",
-        "Diners at 2am - confessionals with unlimited refills",
-        "24-hour establishments - who keeps the lights on and why",
-        "The changing meaning of downtown after dark",
-        "Bookstores as sanctuaries - the quiet resistance of print",
-        "The art of the mix tape - playlists as unsent letters",
-        "Street food and the democracy of flavor",
-        "Public transportation at night - the bus as equalizer",
-    ],
-    "soul_music": [
-        "What makes a song 'soul' - it's not a genre, it's an approach",
-        "The Muscle Shoals sound and the white musicians who played Black",
-        "Motown's assembly line of heartbreak",
-        "The gospel roots that feed every groove",
-        "Curtis Mayfield and the politics of the bassline",
-        "Neo-soul and the question of authenticity",
-        "The art of the slow jam - why vulnerability needs a groove",
-        "Funk as philosophy - Parliament and the mothership connection",
-        "Erykah Badu and the church of vibe",
-        "Disco's death and resurrection - who killed the dance floor and who brought it back",
-    ],
-    "night_philosophy": [
-        "What the dark knows that the light doesn't",
-        "Sleep as surrender - why we resist the thing we need most",
-        "Dreams as the radio station of the subconscious",
-        "The 4am confession - why truth comes easier in darkness",
-        "Nocturnal animals and what they teach us about seeing differently",
-        "The history of the night - how humans learned to occupy the dark",
-        "Insomnia as unwanted clarity",
-        "The night sky before light pollution - what we lost when we lit up the world",
-        "Lullabies and the ancient technology of singing someone to sleep",
-        "Why creativity peaks after midnight",
-    ],
-    "listeners": [
-        "Letters from the frequency - your messages answered",
-        "The songs that changed your lives - listener stories",
-        "Questions from the dark - what you've always wanted to know",
-        "Dedications and confessions from the inbox",
-        "Where are you listening from? - the geography of our audience",
+    "festivals": [
+        "Tomorrowland 2026 — what to expect this year",
+        "Ultra Miami and the birth of the modern festival",
+        "Amsterdam Dance Event — the industry's annual gathering",
+        "Burning Man and electronic music in the desert",
+        "Creamfields and the UK festival tradition",
+        "EDC Las Vegas — the scale of the spectacle",
+        "Printworks London — the warehouse that became a cathedral",
+        "Fabric London — 25 years of the world's most important club",
+        "DC-10 Ibiza — Circoloco and the real Ibiza",
+        "Hï Ibiza and the modern superclub",
+        "Berlin's club scene — Berghain and beyond",
+        "The Tulum scene — paradise or parody?",
+        "Awakenings and the Amsterdam techno tradition",
+        "Sonar Barcelona — where music meets technology",
+        "The return of the warehouse party — underground in 2026",
     ],
 }
-
-# Guest characters for interview segments
-INTERVIEW_GUESTS = [
-    {"name": "a retired record store owner from Detroit", "context": "Spent 40 years curating vinyl for a neighborhood"},
-    {"name": "a sound engineer who worked on legendary sessions", "context": "Was in the room when history was made on tape"},
-    {"name": "a radio historian", "context": "Studies the golden age of pirate and community radio"},
-    {"name": "a jazz archivist from a university collection", "context": "Cataloging a century of forgotten recordings"},
-    {"name": "a night shift nurse who listens to us every night", "context": "Knows the hospital's secret soundtrack"},
-    {"name": "a former musician who chose to listen instead of play", "context": "Understanding music differently from the audience"},
-    {"name": "a street food vendor who works the late shift", "context": "The city's midnight economy and its soundtrack"},
-    {"name": "a librarian who specializes in sound recordings", "context": "Preserving voices that time is trying to erase"},
-]
 
 
 # =============================================================================
 # CORE GENERATION
 # =============================================================================
 
-
 def select_topic(topic_focus: str, segment_type: str) -> str:
     """Pick a topic from the pool matching the show's focus."""
     pool = TOPIC_POOLS.get(topic_focus, [])
     if not pool:
-        # Fall back to a combined pool
         all_topics = []
         for topics in TOPIC_POOLS.values():
             all_topics.extend(topics)
@@ -276,7 +223,7 @@ def build_generation_prompt(
     topic_focus: str,
     guest_voice: str | None = None,
 ) -> str:
-    """Build the full prompt for content generation."""
+    """Build the full prompt for DJ dialogue generation."""
     show_context = {
         "show_name": show_name,
         "show_description": show_description,
@@ -285,28 +232,25 @@ def build_generation_prompt(
     }
     base = build_host_prompt(host_id, show_context)
 
-    min_words, max_words = SEGMENT_WORD_TARGETS.get(segment_type, (1500, 2500))
+    min_words, max_words = SEGMENT_WORD_TARGETS.get(segment_type, (60, 120))
 
-    prompt_template = SEGMENT_PROMPTS.get(segment_type, SEGMENT_PROMPTS["deep_dive"])
+    prompt_template = SEGMENT_PROMPTS.get(segment_type, SEGMENT_PROMPTS["track_intro"])
 
-    # Handle special template vars
-    if segment_type == "news_analysis":
+    # Handle news-based segments
+    if segment_type == "festival_update":
         headlines = fetch_headlines()
-        headline_text = format_headlines(headlines) if headlines else "No headlines available - discuss the nature of news itself."
-        prompt_template = prompt_template.format(headlines=headline_text)
-    elif segment_type == "interview":
-        guest = random.choice(INTERVIEW_GUESTS)
-        prompt_template = prompt_template.format(guest_name=guest["name"])
-        topic = f"{topic} (Guest context: {guest['context']})"
-    elif segment_type == "panel":
-        # Panel uses two hosts
-        pass
+        if headlines:
+            headline_text = format_headlines(headlines)
+            prompt_template += f"\n\nRecent headlines for context:\n{headline_text}"
 
     prompt = f"""{base}
 
 SEGMENT: {segment_type}
 TOPIC: {topic}
 TARGET LENGTH: {min_words}-{max_words} words
+
+IMPORTANT: Keep it SHORT. You are a DJ talking between tracks, not giving a lecture.
+Be specific — name artists, tracks, venues, festivals, labels. No generic filler.
 
 {prompt_template}"""
 
@@ -315,19 +259,30 @@ TARGET LENGTH: {min_words}-{max_words} words
 
 def run_generation(prompt: str, segment_type: str) -> str | None:
     """Run Claude CLI to generate the script."""
-    min_words, max_words = SEGMENT_WORD_TARGETS.get(segment_type, (1500, 2500))
-    timeout = 120 if max_words < 200 else 300
+    min_words, max_words = SEGMENT_WORD_TARGETS.get(segment_type, (60, 120))
+    timeout = 60  # Short segments need less time
 
     script = run_claude(prompt, timeout=timeout)
     if not script:
         return None
 
-    # Quality gate: check word count
+    # Quality gate: check word count (more lenient for short segments)
     word_count = len(script.split())
-    min_acceptable = int(min_words * 0.8)
+    min_acceptable = max(10, int(min_words * 0.6))
     if word_count < min_acceptable:
         log(f"Script too short: {word_count} words (need {min_acceptable}+)")
         return None
+
+    # Truncate if way too long
+    if word_count > max_words * 2:
+        words = script.split()[:max_words]
+        script = ' '.join(words)
+        # Try to end at a sentence
+        for end in ['. ', '! ', '? ']:
+            last_idx = script.rfind(end)
+            if last_idx > len(script) * 0.5:
+                script = script[:last_idx + 1]
+                break
 
     return script
 
@@ -335,7 +290,6 @@ def run_generation(prompt: str, segment_type: str) -> str | None:
 # =============================================================================
 # TTS RENDERING
 # =============================================================================
-
 
 def render_kokoro(text: str, output_path: Path, voice: str = "am_michael") -> bool:
     """Render text to speech using Kokoro TTS."""
@@ -380,7 +334,7 @@ print("SUCCESS")
             [str(venv_python), "-c", tts_script],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=120,
             cwd=str(kokoro_dir),
         )
         return "SUCCESS" in result.stdout
@@ -391,17 +345,14 @@ print("SUCCESS")
 
 def render_single_voice(script: str, output_path: Path, voice: str) -> bool:
     """Render a single-voice script to audio, chunking for long content."""
+    import re
     MAX_CHUNK_WORDS = 100
     words = script.split()
 
     if len(words) <= MAX_CHUNK_WORDS:
         return render_kokoro(script, output_path, voice)
 
-    # Split at sentence boundaries
-    import re
     sentences = re.split(r'(?<=[.!?])\s+', script)
-
-    # Group into chunks
     chunks = []
     current_chunk = []
     current_words = 0
@@ -437,131 +388,31 @@ def render_single_voice(script: str, output_path: Path, voice: str) -> bool:
     return _concatenate_audio(chunk_files, output_path)
 
 
-def render_multi_voice(script: str, output_path: Path, voices: dict[str, str]) -> bool:
-    """Render a multi-voice script (panel/interview) to audio.
-
-    Parses HOST:/GUEST: or HOST_A:/HOST_B: markers and renders each speaker
-    with their assigned voice. Concatenates with brief gaps.
-    """
-    import re
-
-    # Parse speaker markers
-    # Matches HOST:, GUEST:, HOST_A:, HOST_B:, or named markers like DR. RESONANCE:
-    segments = re.split(r'((?:HOST|GUEST|HOST_A|HOST_B|[A-Z][A-Z\s.]+):)', script)
-
-    # Build ordered list of (speaker_key, text)
-    parts: list[tuple[str, str]] = []
-    current_speaker = None
-    for seg in segments:
-        seg = seg.strip()
-        if not seg:
-            continue
-        if re.match(r'^(?:HOST|GUEST|HOST_A|HOST_B|[A-Z][A-Z\s.]+):$', seg):
-            current_speaker = seg.rstrip(':').strip()
-        elif current_speaker:
-            parts.append((current_speaker, seg))
-        else:
-            # No speaker marker yet, treat as host
-            parts.append(("HOST", seg))
-
-    if not parts:
-        # No markers found, render as single voice
-        host_voice = voices.get("host", "am_michael")
-        return render_single_voice(script, output_path, host_voice)
-
-    # Map speaker keys to voices
-    voice_map = {}
-    host_voice = voices.get("host", "am_michael")
-    guest_voice = voices.get("guest", "af_bella")
-
-    for key in ("HOST", "HOST_A"):
-        voice_map[key] = host_voice
-    for key in ("GUEST", "HOST_B"):
-        voice_map[key] = guest_voice
-
-    log(f"  Rendering {len(parts)} dialogue segments...")
-
-    # Render each part
-    chunk_files = []
-    for i, (speaker, text) in enumerate(parts):
-        voice = voice_map.get(speaker, host_voice)
-        chunk_path = output_path.with_stem(f"{output_path.stem}_part{i:03d}")
-
-        # Clean text
-        text = preprocess_for_tts(text)
-        if not text.strip():
-            continue
-
-        # Render in sub-chunks if long
-        if len(text.split()) > 100:
-            if render_single_voice(text, chunk_path, voice):
-                chunk_files.append(chunk_path)
-        else:
-            for attempt in range(2):
-                if render_kokoro(text, chunk_path, voice):
-                    chunk_files.append(chunk_path)
-                    break
-                time.sleep(2)
-
-    if not chunk_files:
-        log("  No dialogue parts rendered")
-        return False
-
-    return _concatenate_audio(chunk_files, output_path, gap_seconds=0.3)
-
-
-def _concatenate_audio(chunk_files: list[Path], output_path: Path, gap_seconds: float = 0) -> bool:
-    """Concatenate WAV files, optionally with silence gaps between them."""
+def _concatenate_audio(chunk_files: list[Path], output_path: Path) -> bool:
+    """Concatenate chunk files using ffmpeg."""
     if len(chunk_files) == 1:
         chunk_files[0].rename(output_path)
         return True
 
-    list_file = output_path.with_suffix('.concat.txt')
+    list_file = output_path.with_suffix(".txt")
+    list_file.write_text("\n".join(f"file '{f}'" for f in chunk_files))
 
-    try:
-        with open(list_file, 'w') as f:
-            for i, cf in enumerate(chunk_files):
-                f.write(f"file '{cf}'\n")
-
-        # Use ffmpeg concat
-        cmd = [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-            "-i", str(list_file),
-            "-c", "copy", str(output_path)
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
-
-        # Cleanup
-        list_file.unlink(missing_ok=True)
-        for cf in chunk_files:
-            cf.unlink(missing_ok=True)
-
-        if result.returncode != 0:
-            log(f"  Concat failed: {result.stderr.decode()[:100]}")
-            return False
-
-        return output_path.exists()
-
-    except Exception as e:
-        log(f"  Concat error: {e}")
-        list_file.unlink(missing_ok=True)
-        return False
-
-
-def get_duration(filepath: Path) -> float | None:
-    """Get audio duration in seconds."""
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(filepath)],
-            capture_output=True, text=True, timeout=10
+            ["ffmpeg", "-v", "warning", "-y", "-f", "concat", "-safe", "0",
+             "-i", str(list_file), "-c", "copy", str(output_path)],
+            capture_output=True, timeout=30,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return float(result.stdout.strip())
+        success = result.returncode == 0 and output_path.exists()
     except Exception:
-        pass
-    return None
+        success = False
+
+    # Cleanup
+    list_file.unlink(missing_ok=True)
+    for f in chunk_files:
+        f.unlink(missing_ok=True)
+
+    return success
 
 
 # =============================================================================
@@ -576,264 +427,135 @@ def generate_segment(
     host_id: str,
     topic_focus: str,
     segment_type: str,
-    voices: dict[str, str],
-    topic: str | None = None,
-) -> Path | None:
-    """Generate a single talk segment with audio."""
-    if topic is None:
-        topic = select_topic(topic_focus, segment_type)
+    voice: str,
+) -> bool:
+    """Generate a single DJ dialogue segment."""
+    topic = select_topic(topic_focus, segment_type)
+    log(f"  Generating {segment_type}: {topic[:60]}...")
 
-    min_words, max_words = SEGMENT_WORD_TARGETS.get(segment_type, (1500, 2500))
-    log(f"=== Generating {segment_type} for {show_name} ===")
-    log(f"  Topic: {topic[:80]}...")
-    log(f"  Target: {min_words}-{max_words} words")
-    log(f"  Host: {host_id} (voice: {voices.get('host', 'am_michael')})")
-
-    # Build prompt and generate script
     prompt = build_generation_prompt(
-        host_id=host_id,
-        segment_type=segment_type,
-        topic=topic,
-        show_name=show_name,
-        show_description=show_description,
-        topic_focus=topic_focus,
-        guest_voice=voices.get("guest"),
+        host_id, segment_type, topic, show_name, show_description, topic_focus,
     )
 
-    # Try generation with one retry
-    script = None
-    for attempt in range(2):
-        script = run_generation(prompt, segment_type)
-        if script:
-            break
-        if attempt == 0:
-            log("  Retrying generation...")
-            time.sleep(3)
-
+    script = run_generation(prompt, segment_type)
     if not script:
-        log("  Failed to generate script")
-        return None
+        log(f"  Generation failed for {segment_type}")
+        return False
 
     word_count = len(script.split())
-    est_minutes = word_count / 130
-    log(f"  Generated {word_count} words (~{est_minutes:.1f} min)")
-
-    # Prepare output
-    show_dir = OUTPUT_DIR / show_id
-    show_dir.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    topic_slug = topic[:30].lower()
-    for char in ' -:,\'".?!()':
-        topic_slug = topic_slug.replace(char, '_')
-    topic_slug = '_'.join(filter(None, topic_slug.split('_')))
-
-    output_path = show_dir / f"{segment_type}_{topic_slug}_{timestamp}.wav"
+    log(f"  Script: {word_count} words")
 
     # Preprocess for TTS
-    processed = preprocess_for_tts(script)
+    tts_text = preprocess_for_tts(script)
 
-    # Render audio
-    log("  Rendering audio...")
-    is_multi_voice = segment_type in ("panel", "interview")
+    # Generate output paths
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = OUTPUT_DIR / show_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{segment_type}_{timestamp}.wav"
 
-    if is_multi_voice:
-        success = render_multi_voice(processed, output_path, voices)
-    else:
-        host_voice = voices.get("host", "am_michael")
-        success = render_single_voice(processed, output_path, host_voice)
-
-    if not success or not output_path.exists():
-        log("  TTS rendering failed")
-        return None
-
-    # Get duration and save metadata
-    duration = get_duration(output_path)
-    duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}" if duration else "?"
-
+    # Save script metadata
     SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    meta_path = SCRIPTS_DIR / f"talk_{segment_type}_{timestamp}.json"
-    with open(meta_path, "w") as f:
-        json.dump({
-            "type": segment_type,
-            "show_id": show_id,
-            "show_name": show_name,
-            "host": host_id,
-            "topic": topic,
-            "script": script,
-            "word_count": word_count,
-            "duration_seconds": duration,
-            "voices": voices,
-            "generated_at": datetime.now().isoformat(),
-        }, f, indent=2)
+    script_meta = {
+        "show_id": show_id,
+        "segment_type": segment_type,
+        "topic": topic,
+        "word_count": word_count,
+        "voice": voice,
+        "generated_at": datetime.now().isoformat(),
+        "script": script,
+    }
+    script_path = SCRIPTS_DIR / f"dj_{segment_type}_{timestamp}.json"
+    script_path.write_text(json.dumps(script_meta, indent=2))
 
-    log(f"  Created: {output_path.name} ({duration_str})")
-    return output_path
+    # Render TTS
+    log(f"  Rendering with voice {voice}...")
+    if render_single_voice(tts_text, output_path, voice):
+        log(f"  Saved: {output_path.name}")
+        return True
+    else:
+        log(f"  TTS rendering failed")
+        return False
 
 
-def generate_for_show(
-    show_id: str,
-    schedule: StationSchedule,
-    count: int = 3,
-    segment_type: str | None = None,
-    topic: str | None = None,
-) -> int:
-    """Generate segments for a specific show."""
-    if show_id not in schedule.shows:
+def generate_for_show(show_id: str, count: int = 3) -> int:
+    """Generate DJ segments for a specific show."""
+    schedule = load_schedule(SCHEDULE_PATH)
+    show = schedule.shows.get(show_id)
+    if not show:
         log(f"Unknown show: {show_id}")
-        log(f"Available: {', '.join(schedule.shows.keys())}")
         return 0
 
-    show = schedule.shows[show_id]
+    voice = show.voices.get("host", "am_michael")
+    generated = 0
 
-    log(f"\n{'='*60}")
-    log(f"Generating {count} segments for: {show.name}")
-    log(f"{'='*60}")
-
-    success = 0
     for i in range(count):
-        # Pick segment type
-        if segment_type:
-            st = segment_type
-        else:
-            st = random.choice(show.segment_types)
+        segment_type = random.choice(show.segment_types)
+        if generate_segment(
+            show.show_id, show.name, show.description,
+            show.host, show.topic_focus, segment_type, voice,
+        ):
+            generated += 1
 
-        log(f"\n[{i+1}/{count}]")
-
-        result = generate_segment(
-            show_id=show_id,
-            show_name=show.name,
-            show_description=show.description,
-            host_id=show.host,
-            topic_focus=show.topic_focus,
-            segment_type=st,
-            voices=dict(show.voices),
-            topic=topic,
-        )
-        if result:
-            success += 1
-
-        if i < count - 1:
-            time.sleep(2)
-
-    return success
+    return generated
 
 
-def generate_for_current(schedule: StationSchedule, count: int = 3) -> int:
-    """Generate segments for the currently active show."""
-    resolved = schedule.resolve()
-    return generate_for_show(resolved.show_id, schedule, count)
-
-
-def generate_all(schedule: StationSchedule, count_per_show: int = 3) -> dict[str, int]:
-    """Generate content for all shows."""
-    log("=== WRIT-FM Full Talk Content Generation ===")
-    log(f"Generating {count_per_show} segments per show")
-
-    results = {}
-    for show_id in schedule.shows:
-        results[show_id] = generate_for_show(show_id, schedule, count_per_show)
-        time.sleep(3)
-
-    log("\n=== Generation Complete ===")
-    total = 0
-    for show_id, count in results.items():
-        show = schedule.shows[show_id]
-        log(f"  {show.name}: {count}/{count_per_show}")
-        total += count
-
-    log(f"Total: {total} segments generated")
-    return results
-
-
-def count_segments() -> dict[str, int]:
-    """Count existing segments per show."""
-    counts = {}
+def get_status() -> dict[str, int]:
+    """Get count of DJ segments per show."""
+    status = {}
     if OUTPUT_DIR.exists():
         for show_dir in OUTPUT_DIR.iterdir():
             if show_dir.is_dir():
-                wavs = list(show_dir.glob("*.wav"))
-                counts[show_dir.name] = len(wavs)
-    return counts
+                count = len(list(show_dir.glob("*.wav")))
+                status[show_dir.name] = count
+    return status
 
 
 # =============================================================================
 # CLI
 # =============================================================================
 
-
-def main():
-    parser = argparse.ArgumentParser(description="WRIT-FM Talk Segment Generator")
-    parser.add_argument("--show", help="Show ID to generate for (default: current show)")
-    parser.add_argument("--type", dest="segment_type", help="Specific segment type")
-    parser.add_argument("--topic", help="Specific topic")
-    parser.add_argument("--count", type=int, default=3, help="Segments to generate (default: 3)")
+def _cli() -> int:
+    parser = argparse.ArgumentParser(description="Deep House Radio DJ dialogue generator")
+    parser.add_argument("--show", type=str, help="Generate for specific show")
+    parser.add_argument("--count", type=int, default=3, help="Segments per show")
+    parser.add_argument("--type", type=str, help="Specific segment type")
     parser.add_argument("--all", action="store_true", help="Generate for all shows")
-    parser.add_argument("--status", action="store_true", help="Show segment counts per show")
-    parser.add_argument("--list-types", action="store_true", help="List segment types")
-    parser.add_argument("--list-topics", help="List topics for a focus area")
+    parser.add_argument("--status", action="store_true", help="Show segment counts")
 
     args = parser.parse_args()
 
-    if args.list_types:
-        print("\n=== Segment Types ===\n")
-        print("Long-form (primary content):")
-        for st in ["deep_dive", "news_analysis", "interview", "panel", "story", "listener_mailbag", "music_essay"]:
-            mn, mx = SEGMENT_WORD_TARGETS[st]
-            print(f"  {st:20s} {mn}-{mx} words")
-        print("\nShort-form (transitions):")
-        for st in ["station_id", "show_intro", "show_outro"]:
-            mn, mx = SEGMENT_WORD_TARGETS[st]
-            print(f"  {st:20s} {mn}-{mx} words")
-        return 0
-
-    if args.list_topics:
-        focus = args.list_topics
-        pool = TOPIC_POOLS.get(focus)
-        if not pool:
-            print(f"Unknown focus: {focus}")
-            print(f"Available: {', '.join(TOPIC_POOLS.keys())}")
-            return 1
-        print(f"\n=== Topics: {focus} ===\n")
-        for i, topic in enumerate(pool, 1):
-            print(f"  {i:2d}. {topic}")
-        return 0
-
-    # Load schedule
-    try:
-        schedule = load_schedule(SCHEDULE_PATH)
-        log(f"Loaded schedule with {len(schedule.shows)} shows")
-    except Exception as e:
-        log(f"Failed to load schedule: {e}")
-        return 1
-
     if args.status:
-        counts = count_segments()
-        print("\n=== Talk Segment Inventory ===\n")
-        for show_id, show in schedule.shows.items():
-            c = counts.get(show_id, 0)
-            status = "OK" if c >= 6 else "LOW" if c >= 3 else "EMPTY"
-            print(f"  {show.name:30s} {c:3d} segments  [{status}]")
-        total = sum(counts.values())
-        print(f"\n  Total: {total} segments")
+        status = get_status()
+        print("DJ Segment Status:")
+        for show, count in sorted(status.items()):
+            print(f"  {show:20s} {count} segments")
+        if not status:
+            print("  (no segments)")
         return 0
 
-    # Generate
     if args.all:
-        generate_all(schedule, args.count)
-    elif args.show:
-        generate_for_show(args.show, schedule, args.count, args.segment_type, args.topic)
-    else:
-        if args.segment_type or args.topic:
-            resolved = schedule.resolve()
-            generate_for_show(
-                resolved.show_id, schedule, args.count, args.segment_type, args.topic
-            )
-        else:
-            generate_for_current(schedule, args.count)
+        schedule = load_schedule(SCHEDULE_PATH)
+        total = 0
+        for show_id in schedule.shows:
+            log(f"=== {show_id} ===")
+            total += generate_for_show(show_id, args.count)
+        log(f"Total generated: {total}")
+        return 0
 
+    if args.show:
+        generated = generate_for_show(args.show, args.count)
+        log(f"Generated {generated} segments for {args.show}")
+        return 0
+
+    # Default: generate for current show
+    schedule = load_schedule(SCHEDULE_PATH)
+    resolved = schedule.resolve()
+    log(f"Current show: {resolved.name} ({resolved.show_id})")
+    generated = generate_for_show(resolved.show_id, args.count)
+    log(f"Generated {generated} segments")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(_cli())

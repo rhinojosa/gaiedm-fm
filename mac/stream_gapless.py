@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-WRIT-FM Gapless Streamer (Talk-First Edition)
+Deep House Radio — Music-First Streamer with DJ Crossfading
 
-Streams talk segments with music bumpers to Icecast.
-Uses a single ffmpeg encoder fed by continuous PCM from decoded audio.
+Streams music tracks to Icecast with beat-matched crossfade transitions,
+DJ interjections between sets, and anthem rotation.
 
-Flow: talk segment -> music bumper (60-120s) -> talk segment -> ...
+Flow: track → crossfade → track → ... → DJ interjection → track → ...
 """
 
 import subprocess
@@ -21,7 +21,7 @@ from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field
 
-# Import play history tracker
+# Import subsystems
 try:
     from play_history import get_history
     HISTORY_ENABLED = True
@@ -37,7 +37,7 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Directories
-TALK_SEGMENTS_DIR = PROJECT_ROOT / "output" / "talk_segments"
+DJ_SEGMENTS_DIR = PROJECT_ROOT / "output" / "talk_segments"
 AI_BUMPERS_DIR = PROJECT_ROOT / "output" / "music_bumpers"
 
 # Weekly schedule
@@ -63,13 +63,12 @@ ICECAST_STATUS_URL = os.environ.get(
 running = True
 encoder_proc = None
 skip_current = False
-force_segment = False
-last_bumper_path: Path | None = None
 current_track_info: dict = {
     "track": None,
+    "artist": None,
     "type": None,
-    "host": None,
-    "segment_type": None,
+    "bpm": None,
+    "key": None,
     "show_id": None,
     "show": None,
     "listeners": 0,
@@ -100,11 +99,11 @@ NOW_PLAYING_PATHS = list(dict.fromkeys(NOW_PLAYING_PATHS))
 
 
 # =============================================================================
-# PROGRAM CONTEXT
+# SHOW CONTEXT
 # =============================================================================
 
 @dataclass
-class ProgramContext:
+class ShowContext:
     show_id: str
     show_name: str
     show_description: str
@@ -113,15 +112,18 @@ class ProgramContext:
     segment_types: list[str]
     bumper_style: str
     voices: dict[str, str] = field(default_factory=dict)
+    bpm_range: tuple[int, int] = (118, 128)
+    music_genres: list[str] = field(default_factory=lambda: ["deep house"])
+    crossfade_beats: int = 32
+    dj_frequency: int = 4
+    anthem_enabled: bool = True
+    anthem_frequency: int = 4
 
 
-def get_program_context(station_schedule=None) -> ProgramContext:
-    """Resolve the current show/program from the schedule."""
-    if station_schedule is None:
-        raise RuntimeError("Station schedule is required")
-
+def get_show_context(station_schedule) -> ShowContext:
+    """Resolve the current show from the schedule."""
     resolved = station_schedule.resolve()
-    return ProgramContext(
+    return ShowContext(
         show_id=resolved.show_id,
         show_name=resolved.name,
         show_description=resolved.description,
@@ -130,28 +132,18 @@ def get_program_context(station_schedule=None) -> ProgramContext:
         segment_types=resolved.segment_types,
         bumper_style=resolved.bumper_style,
         voices=dict(resolved.voices),
+        bpm_range=resolved.bpm_range,
+        music_genres=list(resolved.music_genres),
+        crossfade_beats=resolved.crossfade_beats,
+        dj_frequency=resolved.dj_frequency,
+        anthem_enabled=resolved.anthem_enabled,
+        anthem_frequency=resolved.anthem_frequency,
     )
 
 
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
-
-
-def record_play(filepath: Path, name: str, vibe: str, show_id: str):
-    """Record a track play in the history database."""
-    if HISTORY_ENABLED:
-        try:
-            get_history().record_play(
-                filepath=str(filepath),
-                track_name=name,
-                vibe=vibe,
-                time_period=show_id,
-                listeners=get_listener_count(),
-            )
-        except Exception:
-            pass
-
 
 def signal_handler(signum, frame):
     global running, encoder_proc
@@ -202,27 +194,28 @@ def write_json_atomic(path: Path, payload: dict) -> None:
 def update_now_playing(
     track: str,
     track_type: str,
+    artist: str = "",
+    bpm: float | None = None,
+    key: str = "",
     show_id: str | None = None,
     show_name: str | None = None,
     host: str | None = None,
-    segment_type: str | None = None,
-    caption: str | None = None,
+    is_anthem: bool = False,
 ):
-    """Update current track info in-memory and write to disk for external sync."""
+    """Update current track info in-memory and write to disk."""
     new_info = {
         "track": track,
+        "artist": artist,
         "type": track_type,
-        "host": host,
-        "segment_type": segment_type,
+        "bpm": bpm,
+        "key": key,
         "show_id": show_id,
         "show": show_name,
+        "host": host,
+        "is_anthem": is_anthem,
         "timestamp": datetime.now().isoformat(),
         "listeners": get_listener_count(),
     }
-    if caption is not None:
-        new_info["ai_generated"] = True
-        new_info["caption"] = caption
-    # Atomic-ish update: overwrite all keys at once (no clear() gap)
     current_track_info.update(new_info)
     for k in list(current_track_info):
         if k not in new_info:
@@ -230,6 +223,21 @@ def update_now_playing(
     for path in NOW_PLAYING_PATHS:
         try:
             write_json_atomic(path, current_track_info)
+        except Exception:
+            pass
+
+
+def record_play(filepath: Path, name: str, vibe: str, show_id: str):
+    """Record a track play in the history database."""
+    if HISTORY_ENABLED:
+        try:
+            get_history().record_play(
+                filepath=str(filepath),
+                track_name=name,
+                vibe=vibe,
+                time_period=show_id,
+                listeners=get_listener_count(),
+            )
         except Exception:
             pass
 
@@ -245,197 +253,51 @@ def check_command() -> str | None:
     return None
 
 
-
-def clean_name(filepath: Path, is_speech: bool = False) -> str:
-    name = filepath.stem
-
-    if is_speech:
-        segment_types = {
-            "listener_response": "Listener Mail",
-            "deep_dive": "Deep Dive",
-            "news_analysis": "Signal Report",
-            "interview": "The Interview",
-            "panel": "Crosswire",
-            "story": "Story Hour",
-            "listener_mailbag": "Listener Hours",
-            "music_essay": "Sonic Essay",
-            "station_id": "WRIT-FM",
-            "show_intro": "Show Opening",
-            "show_outro": "Show Closing",
-            # Legacy types
-            "long_talk": "The Operator Speaks",
-            "music_history": "Sonic Archaeology",
-            "late_night": "Late Night Transmission",
-            "monologue": "Midnight Musings",
-            "dedication": "For the Night Owls",
-            "weather": "Conditions Unknown",
-            "news": "Signals from Elsewhere",
-            "poetry": "Verse from the Void",
-        }
-        for key, friendly in segment_types.items():
-            if key in name.lower():
-                return friendly
-        return "Transmission"
-
-    patterns = [
-        r'\s*\(Official.*?\)', r'\s*\[Official.*?\]',
-        r'\s*\(Full Album.*?\)', r'\s*\[Full Album.*?\]',
-        r'\s*\(HD\)', r'\s*\[HD\]', r'\s*\(Audio\)', r'\s*\[Audio\]',
-        r'\s*\(Lyrics\)', r'\s*\[Lyrics\]', r'\s*\(Visualizer\)',
-        r'\s*\|.*$', r'\s*\u29f9.*$', r'_seg\d+_\d+$',
-    ]
-    for p in patterns:
-        name = re.sub(p, '', name, flags=re.IGNORECASE)
-    return name.strip()
-
-
-def get_track_duration(filepath: Path) -> float | None:
-    """Get track duration in seconds using ffprobe."""
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(filepath)],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return float(result.stdout.strip())
-    except Exception:
-        pass
-    return None
-
-
 # =============================================================================
-# TALK SEGMENT MANAGEMENT
+# DJ SEGMENT MANAGEMENT
 # =============================================================================
 
-def get_talk_segments(show_id: str) -> list[Path]:
-    """Load pre-generated talk segments for a show.
-
-    Listener responses are sorted to the front so they air first.
-    """
-    show_dir = TALK_SEGMENTS_DIR / show_id
+def get_dj_segments(show_id: str) -> list[Path]:
+    """Load pre-generated DJ dialogue segments for a show."""
+    show_dir = DJ_SEGMENTS_DIR / show_id
     if not show_dir.exists():
         return []
 
     segments = sorted(show_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime)
-
-    # Prioritize listener responses — they should air before other talk segments
-    listener_responses = [s for s in segments if "listener_response" in s.name]
-    other_segments = [s for s in segments if "listener_response" not in s.name]
-    return listener_responses + other_segments
+    return segments
 
 
-def get_listener_responses(show_id: str) -> list[Path]:
-    """Check for new listener response segments (for mid-queue injection)."""
-    show_dir = TALK_SEGMENTS_DIR / show_id
-    if not show_dir.exists():
-        return []
-    return sorted(
-        (f for f in show_dir.glob("listener_response_*.wav")),
-        key=lambda p: p.stat().st_mtime,
-    )
-
-
-def select_ai_bumper(show_id: str, exclude: set[Path] | None = None) -> tuple[Path, float, float, str | None, str | None] | None:
-    """Pick a pre-generated AI music bumper for the current show.
-
-    Returns (path, start_time, duration, caption, display_name) or None if unavailable.
-    """
-    show_dir = AI_BUMPERS_DIR / show_id
-    if not show_dir.exists():
-        return None
-
-    audio_files = [
-        f for f in show_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in {".flac", ".mp3", ".wav"}
-    ]
-    if not audio_files:
-        return None
-
-    # Filter recently played if history available
-    candidates = audio_files
-    if HISTORY_ENABLED:
-        try:
-            history = get_history()
-            fresh = history.filter_recent(audio_files, hours=4)
-            if fresh:
-                candidates = fresh
-        except Exception:
-            pass
-
-    # Exclude tracks already played in this set + the last bumper played
-    skip = set(exclude) if exclude else set()
-    if last_bumper_path is not None:
-        skip.add(last_bumper_path)
-    if skip:
-        candidates = [c for c in candidates if c not in skip]
-        if not candidates:
-            return None
-
-    track = random.choice(candidates)
-    duration = get_track_duration(track)
-
-    caption = None
-    display_name = None
-    meta_path = track.with_suffix(".json")
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text())
-            caption = meta.get("caption")
-            display_name = meta.get("display_name")
-        except Exception:
-            pass
-
-    return (track, 0.0, duration or 90.0, caption, display_name)
-
-
-# =============================================================================
-# AUDIO PIPELINE (unchanged from original)
-# =============================================================================
-
-def decode_to_pcm(filepath: Path, start_time: float = 0, duration: float = None, is_speech: bool = False) -> subprocess.Popen:
-    """Decode audio file to raw PCM, output to stdout."""
-    cmd = ["ffmpeg", "-v", "warning"]
-
-    if start_time > 0:
-        cmd.extend(["-ss", str(start_time)])
-
-    cmd.extend(["-i", str(filepath)])
-
-    if duration is not None:
-        cmd.extend(["-t", str(duration)])
-
-    # Speech gets louder normalization (-14 LUFS vs -16 for music)
-    if is_speech:
-        filters = ["loudnorm=I=-14:TP=-1.5:LRA=7"]
+def get_track_display(track) -> tuple[str, str]:
+    """Get display name and artist for a track."""
+    if hasattr(track, 'path'):
+        path = track.path
     else:
-        filters = ["loudnorm=I=-16:TP=-1.5:LRA=11"]
+        path = Path(track)
 
-    # Fade in/out for music bumpers only
-    if not is_speech:
-        filters.append("afade=t=in:st=0:d=8")
-        if duration is not None and duration > 16:
-            fade_out_start = max(0, duration - 8)
-            filters.append(f"afade=t=out:st={fade_out_start}:d=8")
+    # Try to read from catalog DB
+    try:
+        from music_scanner import get_db
+        conn = get_db()
+        row = conn.execute(
+            "SELECT title, artist FROM tracks WHERE path = ?", (str(path),)
+        ).fetchone()
+        if row and row["title"]:
+            return row["title"], row["artist"] or ""
+    except Exception:
+        pass
 
-    filters.append("aresample=44100")
+    # Fallback: parse filename
+    name = path.stem
+    # Try "Artist - Title" format
+    if " - " in name:
+        parts = name.split(" - ", 1)
+        return parts[1].strip(), parts[0].strip()
+    return name, ""
 
-    cmd.extend([
-        "-vn",
-        "-af", ",".join(filters),
-        "-f", "s16le",
-        "-acodec", "pcm_s16le",
-        "-ar", "44100",
-        "-ac", "2",
-        "-"
-    ])
 
-    return subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL
-    )
-
+# =============================================================================
+# AUDIO PIPELINE
+# =============================================================================
 
 def start_encoder() -> subprocess.Popen:
     """Start persistent ffmpeg encoder to Icecast."""
@@ -448,11 +310,11 @@ def start_encoder() -> subprocess.Popen:
             "-ac", "2",
             "-i", "-",
             "-acodec", "libmp3lame",
-            "-b:a", "96k",
+            "-b:a", "192k",
             "-content_type", "audio/mpeg",
-            "-ice_name", "WRIT-FM",
-            "-ice_description", "The frequency between frequencies",
-            "-ice_genre", "Talk Radio",
+            "-ice_name", "Deep House Radio",
+            "-ice_description", "Feel the frequency",
+            "-ice_genre", "Deep House / Progressive House",
             "-f", "mp3",
             ICECAST_URL
         ],
@@ -475,71 +337,18 @@ def wait_for_encoder_ready(encoder: subprocess.Popen, timeout: float = 2.0) -> b
     return True
 
 
-def pipe_track(filepath: Path, encoder: subprocess.Popen, start_time: float = 0, duration: float = None, is_speech: bool = False) -> bool:
-    """Decode a track and pipe PCM to encoder. Returns False if encoder died."""
-    global running, skip_current, force_segment
-
-    if not running or encoder.poll() is not None:
-        return False
-
-    decoder = None
-    try:
-        decoder = decode_to_pcm(filepath, start_time, duration, is_speech=is_speech)
-
-        while running and not skip_current:
-            chunk = decoder.stdout.read(8192)
-            if not chunk:
-                break
-            try:
-                encoder.stdin.write(chunk)
-                encoder.stdin.flush()
-            except BrokenPipeError:
-                try:
-                    stderr = encoder.stderr.read().decode() if encoder.stderr else ""
-                    if stderr:
-                        log(f"Encoder pipe broke: {stderr[:200]}")
-                except Exception:
-                    pass
-                return False
-
-            cmd = check_command()
-            if cmd == "skip":
-                log("Skipping...")
-                skip_current = True
-                break
-            elif cmd == "segment":
-                log("Will play segment next...")
-                force_segment = True
-
-        return True
-
-    except Exception as e:
-        log(f"Error piping {filepath.name}: {e}")
-        return False
-    finally:
-        if decoder:
-            try:
-                decoder.kill()
-                decoder.wait(timeout=1)
-            except Exception:
-                pass
-        if skip_current:
-            skip_current = False
-
-
 # =============================================================================
-# MAIN LOOP - TALK FIRST
+# MAIN LOOP - MUSIC FIRST WITH CROSSFADING
 # =============================================================================
 
 def run():
-    global running, encoder_proc, force_segment, last_bumper_path
+    global running, encoder_proc, skip_current
 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    log("=== WRIT-FM Talk Radio Streamer ===")
-    log(f"Talk segments: {TALK_SEGMENTS_DIR}")
-    log(f"AI bumpers: {AI_BUMPERS_DIR}")
+    log("=== Deep House Radio — Music-First Streamer ===")
+    log(f"DJ segments: {DJ_SEGMENTS_DIR}")
     log(f"Streaming to: {ICECAST_URL}")
 
     # Load schedule
@@ -556,29 +365,23 @@ def run():
     start_api_thread(current_track_info, lambda: encoder_proc, get_listener_count)
     log("API server started on port 8001")
 
-    # Count talk segments
-    talk_count = 0
-    if TALK_SEGMENTS_DIR.exists():
-        for show_dir in TALK_SEGMENTS_DIR.iterdir():
-            if show_dir.is_dir():
-                c = len(list(show_dir.glob("*.wav")))
-                talk_count += c
-                if c > 0:
-                    log(f"  {show_dir.name}: {c} segments")
-    log(f"Total talk segments: {talk_count}")
-
-    # Count AI music bumpers
-    bumper_count = 0
-    if AI_BUMPERS_DIR.exists():
-        audio_exts = {".flac", ".mp3", ".wav"}
-        for show_dir in AI_BUMPERS_DIR.iterdir():
-            if show_dir.is_dir():
-                c = sum(1 for f in show_dir.iterdir() if f.suffix.lower() in audio_exts)
-                bumper_count += c
-    if bumper_count > 0:
-        log(f"AI music bumpers: {bumper_count} (will use instead of local music)")
-    else:
-        log("AI music bumpers: none")
+    # Initialize music catalog
+    try:
+        from music_scanner import get_db as get_catalog_db
+        from track_selector import (
+            select_next_track, mark_played, get_catalog_track_count,
+            ShowContext as SelectorShowContext,
+        )
+        from crossfade_mixer import (
+            mix_transition, pipe_track_body, pipe_dj_segment, TrackInfo,
+        )
+        catalog_conn = get_catalog_db()
+        CATALOG_ENABLED = True
+        log("Music catalog connected")
+    except ImportError as e:
+        log(f"Music catalog unavailable: {e}")
+        CATALOG_ENABLED = False
+        catalog_conn = None
 
     while running:
         log("Starting encoder...")
@@ -592,156 +395,166 @@ def run():
         log("Encoder connected to Icecast")
 
         while running and encoder_proc.poll() is None:
-            # Get current program context
-            ctx = get_program_context(station_schedule)
-
+            # Get current show
+            ctx = get_show_context(station_schedule)
             log(f"Show: {ctx.show_name} ({ctx.show_id})")
-            log(f"  Host: {ctx.host} | Focus: {ctx.topic_focus}")
+            log(f"  BPM: {ctx.bpm_range[0]}-{ctx.bpm_range[1]} | Crossfade: {ctx.crossfade_beats} beats")
+            log(f"  DJ every {ctx.dj_frequency} tracks | Anthems: {'every ' + str(ctx.anthem_frequency) if ctx.anthem_enabled else 'off'}")
 
-            # Get talk segments for this show
-            talk_queue = get_talk_segments(ctx.show_id)
-            # Listener responses are already sorted to front; shuffle only the rest
-            lr_count = sum(1 for s in talk_queue if "listener_response" in s.name)
-            if lr_count < len(talk_queue):
-                priority = talk_queue[:lr_count]
-                rest = talk_queue[lr_count:]
-                random.shuffle(rest)
-                talk_queue = priority + rest
+            if not CATALOG_ENABLED or catalog_conn is None:
+                log("  No music catalog — waiting 30s...")
+                time.sleep(30)
+                continue
 
-            if talk_queue:
-                log(f"  Talk queue: {len(talk_queue)} segments")
-                if lr_count:
-                    log(f"  Listener responses queued: {lr_count} (priority)")
+            # Check track availability
+            track_count_available = get_catalog_track_count(catalog_conn, ctx.show_id)
+            if track_count_available == 0:
+                log(f"  No tracks for {ctx.show_id} — waiting 30s")
+                log(f"  Run: uv run python mac/music_scanner.py scan")
+                time.sleep(30)
+                continue
 
-                for talk_seg in talk_queue:
-                    if not running or encoder_proc.poll() is not None:
+            log(f"  {track_count_available} tracks available")
+
+            # Create selector context
+            selector_ctx = SelectorShowContext(
+                show_id=ctx.show_id,
+                bpm_range=ctx.bpm_range,
+                music_genres=ctx.music_genres,
+                anthem_enabled=ctx.anthem_enabled,
+                anthem_frequency=ctx.anthem_frequency,
+                crossfade_beats=ctx.crossfade_beats,
+            )
+
+            # Track counters
+            track_num = 0
+            recent_paths: set[str] = set()
+            current_track: TrackInfo | None = None
+
+            # --- Music set loop ---
+            while running and encoder_proc.poll() is None:
+                # Check if show changed
+                new_ctx = get_show_context(station_schedule)
+                if new_ctx.show_id != ctx.show_id:
+                    log(f"Show changed to {new_ctx.show_name} — switching...")
+                    break
+
+                # Check for commands
+                cmd = check_command()
+                if cmd == "skip":
+                    log("  Command: skip")
+                    skip_current = True
+
+                # Select next track
+                track_num += 1
+                next_track = select_next_track(
+                    catalog_conn, selector_ctx,
+                    previous_track=current_track,
+                    track_count=track_num,
+                    recent_paths=recent_paths,
+                )
+
+                if next_track is None:
+                    log("  No tracks available — waiting 15s")
+                    time.sleep(15)
+                    continue
+
+                # Get display info
+                title, artist = get_track_display(next_track)
+                is_anthem = (
+                    ctx.anthem_enabled
+                    and ctx.anthem_frequency > 0
+                    and track_num % ctx.anthem_frequency == 0
+                )
+
+                anthem_tag = " [ANTHEM]" if is_anthem else ""
+                bpm_str = f"{next_track.bpm:.0f}" if next_track.bpm else "?"
+                key_str = next_track.key or "?"
+                log(f"  TRACK {track_num}: {artist} - {title} ({bpm_str} BPM, {key_str}){anthem_tag}")
+
+                update_now_playing(
+                    track=title,
+                    artist=artist,
+                    track_type="anthem" if is_anthem else "music",
+                    bpm=next_track.bpm,
+                    key=next_track.key,
+                    show_id=ctx.show_id,
+                    show_name=ctx.show_name,
+                    host=ctx.host,
+                    is_anthem=is_anthem,
+                )
+
+                # --- Play the track ---
+                if current_track is not None:
+                    # Crossfade from previous track into this one
+                    ok = mix_transition(
+                        current_track, next_track,
+                        encoder_proc.stdin,
+                        crossfade_beats=ctx.crossfade_beats,
+                    )
+                    if not ok:
+                        log("  Crossfade failed, reconnecting...")
                         break
 
-                    # Check if show changed
-                    new_ctx = get_program_context(station_schedule)
-                    if new_ctx.show_id != ctx.show_id:
-                        log(f"Show changed to {new_ctx.show_name} - switching...")
-                        break
-
-                    # Play talk segment
-                    seg_name = clean_name(talk_seg, is_speech=True)
-                    seg_type = _extract_segment_type(talk_seg)
-                    log(f"  TALK: {seg_name}")
-                    update_now_playing(
-                        seg_name, "talk",
-                        show_id=ctx.show_id,
-                        show_name=ctx.show_name,
-                        host=ctx.host,
-                        segment_type=seg_type,
+                    # Pipe body of new track (after crossfade head, before crossfade tail)
+                    beat_dur = 60.0 / (next_track.bpm or 120.0)
+                    overlap_secs = ctx.crossfade_beats * beat_dur
+                    ok = pipe_track_body(
+                        next_track, encoder_proc.stdin,
+                        skip_head=overlap_secs * 0.5,
+                        skip_tail=overlap_secs,
+                    )
+                else:
+                    # First track — pipe from start (with fade-in via crossfade mixer)
+                    ok = pipe_track_body(
+                        next_track, encoder_proc.stdin,
+                        skip_head=0.0,
+                        skip_tail=0.0,
                     )
 
-                    if not pipe_track(talk_seg, encoder_proc, is_speech=True):
-                        log("Talk pipe failed, reconnecting...")
-                        break
+                if not ok:
+                    log("  Track pipe failed, reconnecting...")
+                    break
 
-                    # Delete talk segment after playing
-                    try:
-                        talk_seg.unlink()
-                        log(f"    (consumed)")
-                    except Exception:
-                        pass
+                # Record play
+                record_play(next_track.path, f"{artist} - {title}", ctx.bumper_style, ctx.show_id)
+                mark_played(catalog_conn, next_track)
+                recent_paths.add(str(next_track.path))
+                if len(recent_paths) > 50:
+                    recent_paths = set(list(recent_paths)[-30:])
 
-                    record_play(talk_seg, seg_name, "talk", ctx.show_id)
+                current_track = next_track
 
-                    # Play 2-3 songs between talk segments (~30% music)
-                    if running and encoder_proc.poll() is None:
-                        max_tracks = random.randint(3, 4)
-                        set_count = 0
-
-                        while (running and encoder_proc.poll() is None
-                               and set_count < max_tracks):
-                            ai_bumper = select_ai_bumper(ctx.show_id)
-                            if not ai_bumper:
-                                if set_count == 0:
-                                    log("  No AI bumpers available, skipping break")
-                                break
-
-                            bpath, bstart, bdur, bcaption, bdisplay = ai_bumper
-                            bname = bdisplay or "AI Music"
-                            set_count += 1
-                            log(f"  MUSIC {set_count}: {bname} ({int(bdur)}s)")
-                            if bcaption:
-                                log(f"    {bcaption[:70]}...")
-                            update_now_playing(
-                                bname, "bumper",
-                                show_id=ctx.show_id,
-                                show_name=ctx.show_name,
-                                caption=bcaption,
-                            )
-                            if not pipe_track(bpath, encoder_proc, bstart, bdur):
-                                log("Music pipe failed, continuing...")
-                                break
-
-                            record_play(bpath, bname, "ai_bumper", ctx.show_id)
-                            try:
-                                bpath.unlink()
-                                log(f"    (consumed)")
-                            except Exception:
-                                pass
-                            last_bumper_path = bpath
-
-                        if set_count > 0:
-                            log(f"  Music set: {set_count} tracks")
-
-                    # Check for new listener responses that arrived mid-queue
-                    if running and encoder_proc.poll() is None:
-                        fresh = get_listener_responses(ctx.show_id)
-                        # Only play ones not already in our queue
-                        queued_names = {s.name for s in talk_queue}
-                        fresh = [f for f in fresh if f.name not in queued_names]
-                        for resp in fresh:
-                            if not running or encoder_proc.poll() is not None:
-                                break
-                            resp_name = clean_name(resp, is_speech=True)
-                            log(f"  LISTENER RESPONSE (live): {resp_name}")
-                            update_now_playing(
-                                resp_name, "talk",
-                                show_id=ctx.show_id,
-                                show_name=ctx.show_name,
-                                host=ctx.host,
-                                segment_type="listener_response",
-                            )
-                            if pipe_track(resp, encoder_proc, is_speech=True):
-                                try:
-                                    resp.unlink()
-                                    log(f"    (consumed)")
-                                except Exception:
-                                    pass
-
-            else:
-                log(f"  No talk segments for {ctx.show_id}; waiting 30s")
-                time.sleep(30)
+                # --- DJ interjection ---
+                if track_num % ctx.dj_frequency == 0:
+                    dj_segs = get_dj_segments(ctx.show_id)
+                    if dj_segs:
+                        dj_seg = dj_segs[0]  # Take oldest (FIFO)
+                        dj_name = dj_seg.stem
+                        log(f"  DJ: {dj_name}")
+                        update_now_playing(
+                            track=dj_name,
+                            track_type="dj",
+                            show_id=ctx.show_id,
+                            show_name=ctx.show_name,
+                            host=ctx.host,
+                        )
+                        pipe_dj_segment(dj_seg, encoder_proc.stdin)
+                        # Consume after playing
+                        try:
+                            dj_seg.unlink()
+                            log(f"    (consumed)")
+                        except Exception:
+                            pass
 
             if running and encoder_proc.poll() is None:
-                log("Queue complete, refreshing...")
+                log("Set complete, refreshing...")
 
         if running:
             log("Encoder died, restarting...")
             time.sleep(2)
 
     log("=== Stream stopped ===")
-
-
-def _extract_segment_type(filepath: Path) -> str:
-    """Extract segment type from filename."""
-    name = filepath.name.lower()
-    types = [
-        "listener_response",  # Priority: real listener messages
-        "deep_dive", "news_analysis", "interview", "panel", "story",
-        "listener_mailbag", "music_essay", "station_id", "show_intro", "show_outro",
-        # Legacy
-        "long_talk", "monologue", "late_night", "music_history",
-        "dedication", "weather", "news", "poetry",
-    ]
-    for t in types:
-        if t in name:
-            return t
-    return "talk"
 
 
 if __name__ == "__main__":

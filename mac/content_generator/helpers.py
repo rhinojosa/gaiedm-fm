@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared helpers for WRIT-FM content generators.
+Shared helpers for Deep House Radio content generators.
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ from datetime import datetime
 from pathlib import Path
 
 DEFAULT_NEWS_FEEDS = (
-    "https://feeds.bbci.co.uk/news/rss.xml",
-    "https://feeds.npr.org/1001/rss.xml",
+    "https://ra.co/xml/news.xml",
+    "https://djmag.com/feed",
+    "https://www.mixmag.net/feed",
 )
 NEWS_CACHE_TTL_SECONDS = int(os.environ.get("WRIT_NEWS_CACHE_TTL", "600"))
 NEWS_TIMEOUT_SECONDS = int(os.environ.get("WRIT_NEWS_TIMEOUT", "6"))

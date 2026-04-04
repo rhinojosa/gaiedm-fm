@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-WRIT-FM Weekly Scheduling
+Deep House Radio — Weekly Scheduling
 
 Loads `config/schedule.yaml` and resolves the currently-active show based on:
 - day of week (mon..sun)
 - local time (HH:MM)
 
-The streamer can use this to:
-- pick the host persona and topic focus
-- determine segment types for the show
-- select bumper music style for breaks
+The streamer uses this to:
+- pick the DJ host persona
+- determine BPM range, genres, and crossfade settings
+- control anthem rotation and DJ interjection frequency
 """
 
 from __future__ import annotations
@@ -28,9 +28,13 @@ DAY_TO_INDEX = {k: i for i, k in enumerate(DAY_KEYS)}
 INDEX_TO_DAY = {i: k for k, i in DAY_TO_INDEX.items()}
 
 VALID_SEGMENT_TYPES = {
+    # EDM DJ segment types
+    "track_intro", "set_intro", "set_outro", "artist_spotlight",
+    "festival_update", "anthem_announce", "station_id",
+    # Legacy talk types (kept for backward compat)
     "deep_dive", "news_analysis", "interview", "panel", "story",
     "listener_mailbag", "listener_response", "music_essay",
-    "station_id", "show_intro", "show_outro",
+    "show_intro", "show_outro",
 }
 
 
@@ -111,15 +115,18 @@ class Show:
     show_id: str
     name: str
     description: str
-    host: str = "liminal_operator"
+    host: str = "dj_cascade"
     topic_focus: str = ""
-    segment_types: list[str] = field(default_factory=lambda: ["deep_dive"])
-    bumper_style: str = "ambient"
+    segment_types: list[str] = field(default_factory=lambda: ["track_intro"])
+    bumper_style: str = "deep_house"
     voices: dict[str, str] = field(default_factory=dict)
-    # Legacy fields (optional, unused in talk-first mode)
-    segment_after_tracks: int = 1
-    podcasts_enabled: bool = False
-    music: dict[str, Any] = field(default_factory=dict)
+    # EDM-specific fields
+    bpm_range: tuple[int, int] = (118, 128)
+    music_genres: list[str] = field(default_factory=lambda: ["deep house"])
+    crossfade_beats: int = 32
+    dj_frequency: int = 4           # DJ speaks every N tracks
+    anthem_enabled: bool = True
+    anthem_frequency: int = 4       # play anthem every N tracks
 
 
 @dataclass(frozen=True)
@@ -163,11 +170,13 @@ class ResolvedShow:
     segment_types: list[str]
     bumper_style: str
     voices: dict[str, str]
-    # Legacy (kept for backward compat)
-    segment_after_tracks: int = 1
-    podcasts_enabled: bool = False
-    podcast_hours: set[int] = field(default_factory=set)
-    music_profile: dict[str, Any] = field(default_factory=dict)
+    # EDM-specific
+    bpm_range: tuple[int, int] = (118, 128)
+    music_genres: list[str] = field(default_factory=lambda: ["deep house"])
+    crossfade_beats: int = 32
+    dj_frequency: int = 4
+    anthem_enabled: bool = True
+    anthem_frequency: int = 4
 
 
 @dataclass
@@ -175,7 +184,6 @@ class StationSchedule:
     shows: dict[str, Show]
     base: list[ScheduleBlock]
     overrides: list[ScheduleBlock]
-    podcast_hours: set[int] = field(default_factory=set)
 
     def validate(self) -> None:
         if not self.base:
@@ -222,33 +230,31 @@ class StationSchedule:
     def resolve(self, now: datetime | None = None) -> ResolvedShow:
         now = now or datetime.now()
 
+        def _resolve_show(show: Show) -> ResolvedShow:
+            return ResolvedShow(
+                show_id=show.show_id,
+                name=show.name,
+                description=show.description,
+                host=show.host,
+                topic_focus=show.topic_focus,
+                segment_types=list(show.segment_types),
+                bumper_style=show.bumper_style,
+                voices=dict(show.voices),
+                bpm_range=show.bpm_range,
+                music_genres=list(show.music_genres),
+                crossfade_beats=show.crossfade_beats,
+                dj_frequency=show.dj_frequency,
+                anthem_enabled=show.anthem_enabled,
+                anthem_frequency=show.anthem_frequency,
+            )
+
         for block in self.overrides:
             if block.matches(now):
-                show = self.shows[block.show_id]
-                return ResolvedShow(
-                    show_id=show.show_id,
-                    name=show.name,
-                    description=show.description,
-                    host=show.host,
-                    topic_focus=show.topic_focus,
-                    segment_types=list(show.segment_types),
-                    bumper_style=show.bumper_style,
-                    voices=dict(show.voices),
-                )
+                return _resolve_show(self.shows[block.show_id])
 
         for block in self.base:
             if block.matches(now):
-                show = self.shows[block.show_id]
-                return ResolvedShow(
-                    show_id=show.show_id,
-                    name=show.name,
-                    description=show.description,
-                    host=show.host,
-                    topic_focus=show.topic_focus,
-                    segment_types=list(show.segment_types),
-                    bumper_style=show.bumper_style,
-                    voices=dict(show.voices),
-                )
+                return _resolve_show(self.shows[block.show_id])
 
         raise ScheduleError("No matching schedule block for current time (base clock may be invalid)")
 
@@ -291,10 +297,23 @@ def load_schedule(path: Path) -> StationSchedule:
         # Voice config
         voices = cfg.get("voices") if isinstance(cfg.get("voices"), dict) else {}
 
-        # Legacy fields (optional)
-        segment_after_tracks = int(cfg.get("segment_after_tracks", 1))
-        podcasts_enabled = bool(cfg.get("podcasts_enabled", False))
-        music = cfg.get("music") if isinstance(cfg.get("music"), dict) else {}
+        # EDM-specific fields
+        bpm_raw = cfg.get("bpm_range", [118, 128])
+        if isinstance(bpm_raw, list) and len(bpm_raw) == 2:
+            bpm_range = (int(bpm_raw[0]), int(bpm_raw[1]))
+        else:
+            bpm_range = (118, 128)
+
+        music_genres_raw = cfg.get("music_genres", ["deep house"])
+        if isinstance(music_genres_raw, list):
+            music_genres = [str(g).strip() for g in music_genres_raw]
+        else:
+            music_genres = ["deep house"]
+
+        crossfade_beats = int(cfg.get("crossfade_beats", 32))
+        dj_frequency = int(cfg.get("dj_frequency", 4))
+        anthem_enabled = bool(cfg.get("anthem_enabled", True))
+        anthem_frequency = int(cfg.get("anthem_frequency", 4))
 
         shows[show_id] = Show(
             show_id=show_id,
@@ -305,23 +324,13 @@ def load_schedule(path: Path) -> StationSchedule:
             segment_types=segment_types,
             bumper_style=bumper_style,
             voices={str(k): str(v) for k, v in voices.items()},
-            segment_after_tracks=segment_after_tracks,
-            podcasts_enabled=podcasts_enabled,
-            music=dict(music) if music else {},
+            bpm_range=bpm_range,
+            music_genres=music_genres,
+            crossfade_beats=crossfade_beats,
+            dj_frequency=dj_frequency,
+            anthem_enabled=anthem_enabled,
+            anthem_frequency=anthem_frequency,
         )
-
-    # Legacy podcasts config (optional)
-    podcasts_cfg = payload.get("podcasts") if isinstance(payload.get("podcasts"), dict) else {}
-    hours_raw = podcasts_cfg.get("hours", [])
-    if hours_raw is None:
-        hours_raw = []
-    if not isinstance(hours_raw, list):
-        raise ScheduleError("podcasts.hours must be a list of integers")
-    podcast_hours: set[int] = set()
-    for item in hours_raw:
-        if not isinstance(item, int):
-            raise ScheduleError(f"podcasts.hours contains non-int value: {item!r}")
-        podcast_hours.add(item)
 
     sched = payload.get("schedule")
     if not isinstance(sched, dict):
@@ -355,7 +364,6 @@ def load_schedule(path: Path) -> StationSchedule:
         shows=shows,
         base=base_blocks,
         overrides=override_blocks,
-        podcast_hours=podcast_hours,
     )
     schedule.validate()
     return schedule
@@ -402,8 +410,11 @@ def _cli() -> int:
     print(f"{INDEX_TO_DAY[when.weekday()]} {when:%H:%M} -- {resolved.name} ({resolved.show_id})")
     print(f"  Host: {resolved.host}")
     print(f"  Focus: {resolved.topic_focus}")
-    print(f"  Segments: {', '.join(resolved.segment_types)}")
-    print(f"  Bumper: {resolved.bumper_style}")
+    print(f"  BPM: {resolved.bpm_range[0]}-{resolved.bpm_range[1]}")
+    print(f"  Genres: {', '.join(resolved.music_genres)}")
+    print(f"  Crossfade: {resolved.crossfade_beats} beats")
+    print(f"  DJ every: {resolved.dj_frequency} tracks")
+    print(f"  Anthems: {'every ' + str(resolved.anthem_frequency) + ' tracks' if resolved.anthem_enabled else 'off'}")
     return 0
 
 

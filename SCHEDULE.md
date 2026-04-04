@@ -1,83 +1,46 @@
-# Weekly Program Schedule (WRIT-FM)
+# Weekly Program Schedule — Deep House Radio
 
-All times are local, 24-hour. The base clock runs daily; weekly shows override it.
+All times are local, 24-hour. The base clock runs daily; overrides apply on specific days.
 
-## Monday
+## Base Schedule (Daily)
 
-- 00:00–06:00 — Liminal Overnight
-- 06:00–10:00 — Sunrise Drift
-- 10:00–14:00 — Midday Mosaic
-- 14:00–15:00 — The Talk Hour
-- 15:00–18:00 — Peak Signal
-- 18:00–20:00 — Golden Hour
-- 20:00–22:00 — Sonic Archaeology: Jazz Archives (weekly)
-- 22:00–00:00 — Night Transmission
+| Time | Show | DJ | Vibe | BPM |
+|------|------|----|------|-----|
+| 00:00–06:00 | **The Deep** | DJ Cascade | Melodic deep house, Anjunadeep | 118–124 |
+| 06:00–12:00 | **The Deep** | DJ Cascade | Morning melodic, warm grooves | 118–124 |
+| 12:00–18:00 | **Frequencies** | DJ Echo | Underground progressive | 122–128 |
+| 18:00–22:00 | **Anthem Hour** | DJ Neon | Festival anthems, peak time | 124–130 |
+| 22:00–00:00 | **Frequencies** | DJ Echo | Late night progressive | 122–128 |
 
-## Tuesday
+## Weekly Overrides
 
-- 00:00–06:00 — Liminal Overnight
-- 06:00–10:00 — Sunrise Drift
-- 10:00–14:00 — Midday Mosaic
-- 14:00–15:00 — The Talk Hour
-- 15:00–18:00 — Peak Signal
-- 18:00–20:00 — Golden Hour
-- 20:00–22:00 — World Circuit (weekly)
-- 22:00–00:00 — Night Transmission
+| Day | Time | Show | Notes |
+|-----|------|------|-------|
+| Fri & Sat | 00:00–06:00 | **Frequencies** | Underground late-night sessions |
+| Sunday | 12:00–18:00 | **The Deep** | Sunday afternoon recovery |
 
-## Wednesday
+## Shows
 
-- 00:00–06:00 — Liminal Overnight
-- 06:00–10:00 — Sunrise Drift
-- 10:00–14:00 — Midday Mosaic
-- 14:00–15:00 — The Talk Hour
-- 15:00–18:00 — Peak Signal
-- 18:00–20:00 — Golden Hour
-- 20:00–22:00 — Electric Drift (weekly)
-- 22:00–00:00 — Night Transmission
+### The Deep
+Warm, melodic deep house. The Anjunadeep sound — Lane 8, Ben Böhmer, Yotto, Tinlicker, Rufus Du Sol, Nora En Pure, Eli & Fur, Marsh.
+- **DJ**: Cascade (smooth, knowledgeable, Anjunadeep specialist)
+- **BPM**: 118–124
+- **Crossfade**: 32 beats
+- **DJ speaks**: Every 4 tracks
+- **Anthems**: Every 4 tracks
 
-## Thursday
+### Frequencies
+Dark, hypnotic progressive house. The Bedrock/Yoshitoshi sound — Digweed, Sasha, Deep Dish, Hernan Cattaneo, Guy J, Henry Saiz.
+- **DJ**: Echo (minimal, lets the music breathe)
+- **BPM**: 122–128
+- **Crossfade**: 32 beats
+- **DJ speaks**: Every 6 tracks
+- **Anthems**: Every 4 tracks
 
-- 00:00–06:00 — Liminal Overnight
-- 06:00–10:00 — Sunrise Drift
-- 10:00–14:00 — Midday Mosaic
-- 14:00–15:00 — The Talk Hour
-- 15:00–18:00 — Peak Signal
-- 18:00–20:00 — Golden Hour
-- 20:00–22:00 — Memory Lane: Rock & Indie (weekly)
-- 22:00–00:00 — Night Transmission
-
-## Friday
-
-- 00:00–06:00 — Liminal Overnight
-- 06:00–10:00 — Sunrise Drift
-- 10:00–14:00 — Midday Mosaic
-- 14:00–15:00 — The Talk Hour
-- 15:00–18:00 — Peak Signal
-- 18:00–21:00 — Golden Hour
-- 21:00–22:00 — Night Transmission
-- 22:00–00:00 — Club Liminal (weekly; continues into Saturday)
-
-## Saturday
-
-- 00:00–02:00 — Club Liminal (weekly; continuation)
-- 02:00–06:00 — Liminal Overnight
-- 06:00–10:00 — Sunrise Drift
-- 10:00–12:00 — Midday Mosaic
-- 12:00–14:00 — Saturday Soul Service (weekly)
-- 14:00–15:00 — The Talk Hour
-- 15:00–18:00 — Peak Signal
-- 18:00–21:00 — Golden Hour
-- 21:00–00:00 — Night Transmission
-
-## Sunday
-
-- 00:00–06:00 — Liminal Overnight
-- 06:00–10:00 — Sunrise Drift
-- 10:00–12:00 — Slow Sunday (weekly)
-- 12:00–14:00 — Midday Mosaic
-- 14:00–15:00 — The Talk Hour
-- 15:00–18:00 — Peak Signal
-- 18:00–19:00 — Listener Mailbag (weekly)
-- 19:00–21:00 — Golden Hour
-- 21:00–00:00 — Night Transmission
-
+### Anthem Hour
+Peak-time festival energy — Prydz, Deadmau5, Above & Beyond, CamelPhat, Artbat, Boris Brejcha, Stephan Bodzin.
+- **DJ**: Neon (energetic, festival hype)
+- **BPM**: 124–130
+- **Crossfade**: 16 beats (tighter transitions)
+- **DJ speaks**: Every 3 tracks
+- **Anthems**: Every track
