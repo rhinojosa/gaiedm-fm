@@ -87,7 +87,7 @@ def decode_segment(
 
     proc = subprocess.run(cmd, capture_output=True, timeout=120)
     if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg decode failed: {proc.stderr[:200]}")
+        raise RuntimeError(f"ffmpeg decode failed: {proc.stderr[:200].decode(errors='replace')}")
 
     # Convert s16le bytes to float32 numpy array
     raw = np.frombuffer(proc.stdout, dtype=np.int16)
@@ -201,13 +201,14 @@ def mix_transition(
     encoder_stdin: BinaryIO,
     crossfade_beats: int = 32,
     overlap_seconds: float | None = None,
-) -> bool:
+) -> tuple[bool, float]:
     """Perform a DJ-style crossfade transition between two tracks.
 
     Pipes the following sequence to the encoder:
     1. Track A body (from mix_in to just before crossfade region)
     2. Crossfade overlap (A fading out + B fading in, beat-matched)
-    3. Track B will continue from after the crossfade (caller handles next transition)
+
+    The caller must then pipe track B's body starting from the consumed offset.
 
     Args:
         track_a: Outgoing track info
@@ -217,7 +218,8 @@ def mix_transition(
         overlap_seconds: Override crossfade duration (seconds). If None, calculated from beats.
 
     Returns:
-        True if successful, False if encoder died or error occurred.
+        (success, b_consumed_seconds): Whether piping succeeded, and how many
+        seconds of track B's head were consumed by the crossfade.
     """
     try:
         bpm_a = track_a.bpm or 120.0
@@ -246,9 +248,10 @@ def mix_transition(
         a_tail_start = a_start + a_body_duration
         a_tail = decode_segment(track_a.path, a_tail_start, overlap_seconds)
 
-        # Decode track B head for crossfade
+        # Decode track B head for crossfade — start from B's mix_in point
         b_start = track_b.mix_in_pt or 0.0
-        b_head = decode_segment(track_b.path, max(0, b_start - overlap_seconds * 0.5), overlap_seconds)
+        b_head = decode_segment(track_b.path, b_start, overlap_seconds)
+        b_consumed = overlap_seconds
 
         if len(a_tail) > 0 and len(b_head) > 0:
             # Compute and pipe crossfade
@@ -264,14 +267,14 @@ def mix_transition(
                 encoder_stdin.write(numpy_to_pcm_bytes(b_head))
 
         encoder_stdin.flush()
-        return True
+        return True, b_consumed
 
     except (BrokenPipeError, OSError):
         log("  Encoder pipe broken during crossfade")
-        return False
+        return False, 0.0
     except Exception as e:
         log(f"  Crossfade error: {e}")
-        return False
+        return False, 0.0
 
 
 def pipe_track_body(

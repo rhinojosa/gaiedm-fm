@@ -288,7 +288,7 @@ def load_schedule(path: Path) -> StationSchedule:
         # Talk-show fields
         host = str(cfg.get("host", "liminal_operator")).strip()
         topic_focus = str(cfg.get("topic_focus", "")).strip()
-        segment_types_raw = cfg.get("segment_types", ["deep_dive"])
+        segment_types_raw = cfg.get("segment_types", ["track_intro"])
         if not isinstance(segment_types_raw, list):
             raise ScheduleError(f"Show {show_id}: segment_types must be a list")
         segment_types = [str(s).strip() for s in segment_types_raw]
@@ -372,7 +372,7 @@ def load_schedule(path: Path) -> StationSchedule:
 def _cli() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="WRIT-FM schedule tools")
+    parser = argparse.ArgumentParser(description="Deep House Radio schedule tools")
     parser.add_argument(
         "--schedule",
         default=str(Path(__file__).resolve().parents[1] / "config" / "schedule.yaml"),

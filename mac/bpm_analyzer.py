@@ -123,9 +123,10 @@ def analyze_track(filepath: Path) -> dict:
         bpm = float(np.atleast_1d(tempo)[0])
 
         # House music sanity check: if detected BPM is half/double, correct it
-        if bpm < 100 and bpm > 50:
+        # Target range for deep/progressive house: ~110-135 BPM
+        if bpm < 100:
             bpm *= 2
-        elif bpm > 160:
+        if bpm > 160:
             bpm /= 2
         result["bpm"] = round(bpm, 1)
 
@@ -139,8 +140,8 @@ def analyze_track(filepath: Path) -> dict:
         major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
         minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
-        major_corr = np.corrcoef(chroma_avg, np.roll(major_profile, pitch_class))[0, 1]
-        minor_corr = np.corrcoef(chroma_avg, np.roll(minor_profile, pitch_class))[0, 1]
+        major_corr = np.corrcoef(chroma_avg, np.roll(major_profile, -pitch_class))[0, 1]
+        minor_corr = np.corrcoef(chroma_avg, np.roll(minor_profile, -pitch_class))[0, 1]
 
         mode = "major" if major_corr > minor_corr else "minor"
         camelot = CAMELOT_WHEEL.get((key_name, mode), f"{key_name}{mode[0]}")
@@ -158,13 +159,13 @@ def analyze_track(filepath: Path) -> dict:
 
         above = np.where(rms_smooth > threshold)[0]
         if len(above) > 2:
-            # Convert frame indices to seconds
-            frames_per_sec = sr / 512  # default hop_length
-            mix_in = float(above[0]) / frames_per_sec
-            mix_out = float(above[-1]) / frames_per_sec
+            # Convert frame indices to seconds using librosa
+            times = librosa.frames_to_time(above, sr=sr, hop_length=512)
+            mix_in = float(times[0])
+            mix_out = float(times[-1])
             # Clamp to reasonable values
             result["mix_in_pt"] = round(min(mix_in, 30.0), 1)
-            result["mix_out_pt"] = round(min(mix_out, duration), 1)
+            result["mix_out_pt"] = round(max(mix_out, duration - 30.0), 1)
         else:
             result["mix_in_pt"] = 0.0
             result["mix_out_pt"] = round(duration, 1)

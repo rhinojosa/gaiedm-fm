@@ -21,6 +21,9 @@ from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field
 
+# Ensure mac/ is on sys.path for sibling imports
+sys.path.insert(0, str(Path(__file__).parent))
+
 # Import subsystems
 try:
     from play_history import get_history
@@ -257,13 +260,20 @@ def check_command() -> str | None:
 # DJ SEGMENT MANAGEMENT
 # =============================================================================
 
-def get_dj_segments(show_id: str) -> list[Path]:
-    """Load pre-generated DJ dialogue segments for a show."""
+def get_dj_segments(show_id: str, segment_type: str | None = None) -> list[Path]:
+    """Load pre-generated DJ dialogue segments for a show.
+
+    Args:
+        show_id: Show directory to look in
+        segment_type: Optional filter by segment type prefix (e.g. "set_outro")
+    """
     show_dir = DJ_SEGMENTS_DIR / show_id
     if not show_dir.exists():
         return []
 
     segments = sorted(show_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime)
+    if segment_type:
+        segments = [s for s in segments if s.stem.startswith(segment_type)]
     return segments
 
 
@@ -431,12 +441,31 @@ def run():
             recent_paths: set[str] = set()
             current_track: TrackInfo | None = None
 
+            # Play set_intro for starting show if available
+            dj_segs = get_dj_segments(ctx.show_id, segment_type="set_intro")
+            if dj_segs and encoder_proc.poll() is None:
+                log(f"  Set intro: {dj_segs[0].stem}")
+                pipe_dj_segment(dj_segs[0], encoder_proc.stdin)
+                try:
+                    dj_segs[0].unlink()
+                except Exception:
+                    pass
+
             # --- Music set loop ---
             while running and encoder_proc.poll() is None:
                 # Check if show changed
                 new_ctx = get_show_context(station_schedule)
                 if new_ctx.show_id != ctx.show_id:
                     log(f"Show changed to {new_ctx.show_name} — switching...")
+                    # Play set_outro for ending show if available
+                    dj_segs = get_dj_segments(ctx.show_id, segment_type="set_outro")
+                    if dj_segs:
+                        log(f"  Set outro: {dj_segs[0].stem}")
+                        pipe_dj_segment(dj_segs[0], encoder_proc.stdin)
+                        try:
+                            dj_segs[0].unlink()
+                        except Exception:
+                            pass
                     break
 
                 # Check for commands
@@ -472,6 +501,17 @@ def run():
                 key_str = next_track.key or "?"
                 log(f"  TRACK {track_num}: {artist} - {title} ({bpm_str} BPM, {key_str}){anthem_tag}")
 
+                # Anthem announcement before anthem tracks
+                if is_anthem and current_track is not None:
+                    anthem_segs = get_dj_segments(ctx.show_id, segment_type="anthem_announce")
+                    if anthem_segs:
+                        log(f"  Anthem announce: {anthem_segs[0].stem}")
+                        pipe_dj_segment(anthem_segs[0], encoder_proc.stdin)
+                        try:
+                            anthem_segs[0].unlink()
+                        except Exception:
+                            pass
+
                 update_now_playing(
                     track=title,
                     artist=artist,
@@ -485,9 +525,12 @@ def run():
                 )
 
                 # --- Play the track ---
+                beat_dur = 60.0 / (next_track.bpm or 120.0)
+                overlap_secs = ctx.crossfade_beats * beat_dur
+
                 if current_track is not None:
                     # Crossfade from previous track into this one
-                    ok = mix_transition(
+                    ok, b_consumed = mix_transition(
                         current_track, next_track,
                         encoder_proc.stdin,
                         crossfade_beats=ctx.crossfade_beats,
@@ -496,20 +539,18 @@ def run():
                         log("  Crossfade failed, reconnecting...")
                         break
 
-                    # Pipe body of new track (after crossfade head, before crossfade tail)
-                    beat_dur = 60.0 / (next_track.bpm or 120.0)
-                    overlap_secs = ctx.crossfade_beats * beat_dur
+                    # Pipe body of new track (after consumed head, before tail reserved for next crossfade)
                     ok = pipe_track_body(
                         next_track, encoder_proc.stdin,
-                        skip_head=overlap_secs * 0.5,
+                        skip_head=b_consumed,
                         skip_tail=overlap_secs,
                     )
                 else:
-                    # First track — pipe from start (with fade-in via crossfade mixer)
+                    # First track — pipe from start, reserve tail for next crossfade
                     ok = pipe_track_body(
                         next_track, encoder_proc.stdin,
                         skip_head=0.0,
-                        skip_tail=0.0,
+                        skip_tail=overlap_secs,
                     )
 
                 if not ok:
@@ -521,7 +562,9 @@ def run():
                 mark_played(catalog_conn, next_track)
                 recent_paths.add(str(next_track.path))
                 if len(recent_paths) > 50:
-                    recent_paths = set(list(recent_paths)[-30:])
+                    # Keep only 30 most recent (list preserves insertion order)
+                    recent_list = list(recent_paths)
+                    recent_paths = set(recent_list[-30:])
 
                 current_track = next_track
 

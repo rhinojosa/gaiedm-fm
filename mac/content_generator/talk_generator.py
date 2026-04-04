@@ -47,7 +47,6 @@ SCRIPTS_DIR = PROJECT_ROOT / "output" / "scripts"
 sys.path.insert(0, str(PROJECT_ROOT / "mac"))
 from schedule import load_schedule, StationSchedule
 
-sys.path.insert(0, str(Path(__file__).parent))
 from persona import HOSTS, get_host, build_host_prompt, STATION_NAME
 
 # =============================================================================
@@ -300,11 +299,15 @@ def render_kokoro(text: str, output_path: Path, voice: str = "am_michael") -> bo
         log("Kokoro venv not found")
         return False
 
-    escaped_text = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
+    # Use json.dumps for safe string escaping (handles \, ", {, }, newlines, etc.)
+    safe_text = json.dumps(text.replace('\n', ' '))
+    safe_voice = json.dumps(voice)
+    safe_output = json.dumps(str(output_path))
 
     tts_script = f'''
 import warnings
 warnings.filterwarnings("ignore")
+import json
 
 from kokoro import KPipeline
 import soundfile as sf
@@ -312,8 +315,8 @@ import numpy as np
 
 pipe = KPipeline(lang_code="a", repo_id="hexgrad/Kokoro-82M")
 
-text = "{escaped_text}"
-voice = "{voice}"
+text = {safe_text}
+voice = {safe_voice}
 
 generator = pipe(text, voice=voice, speed=1.0)
 audio_segments = []
@@ -325,7 +328,7 @@ if len(audio_segments) == 1:
 else:
     full_audio = np.concatenate(audio_segments)
 
-sf.write("{output_path}", full_audio, 24000)
+sf.write({safe_output}, full_audio, 24000)
 print("SUCCESS")
 '''
 
@@ -478,8 +481,14 @@ def generate_segment(
         return False
 
 
-def generate_for_show(show_id: str, count: int = 3) -> int:
-    """Generate DJ segments for a specific show."""
+def generate_for_show(show_id: str, count: int = 3, segment_type_filter: str | None = None) -> int:
+    """Generate DJ segments for a specific show.
+
+    Args:
+        show_id: Show identifier
+        count: Number of segments to generate
+        segment_type_filter: If set, only generate this segment type
+    """
     schedule = load_schedule(SCHEDULE_PATH)
     show = schedule.shows.get(show_id)
     if not show:
@@ -490,7 +499,10 @@ def generate_for_show(show_id: str, count: int = 3) -> int:
     generated = 0
 
     for i in range(count):
-        segment_type = random.choice(show.segment_types)
+        if segment_type_filter:
+            segment_type = segment_type_filter
+        else:
+            segment_type = random.choice(show.segment_types)
         if generate_segment(
             show.show_id, show.name, show.description,
             show.host, show.topic_focus, segment_type, voice,
@@ -534,17 +546,19 @@ def _cli() -> int:
             print("  (no segments)")
         return 0
 
+    seg_type = getattr(args, 'type', None)
+
     if args.all:
         schedule = load_schedule(SCHEDULE_PATH)
         total = 0
         for show_id in schedule.shows:
             log(f"=== {show_id} ===")
-            total += generate_for_show(show_id, args.count)
+            total += generate_for_show(show_id, args.count, segment_type_filter=seg_type)
         log(f"Total generated: {total}")
         return 0
 
     if args.show:
-        generated = generate_for_show(args.show, args.count)
+        generated = generate_for_show(args.show, args.count, segment_type_filter=seg_type)
         log(f"Generated {generated} segments for {args.show}")
         return 0
 
@@ -552,7 +566,7 @@ def _cli() -> int:
     schedule = load_schedule(SCHEDULE_PATH)
     resolved = schedule.resolve()
     log(f"Current show: {resolved.name} ({resolved.show_id})")
-    generated = generate_for_show(resolved.show_id, args.count)
+    generated = generate_for_show(resolved.show_id, args.count, segment_type_filter=seg_type)
     log(f"Generated {generated} segments")
     return 0
 

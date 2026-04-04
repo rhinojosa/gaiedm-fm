@@ -17,10 +17,14 @@ from __future__ import annotations
 
 import random
 import sqlite3
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# Ensure mac/ is on sys.path for sibling imports
+sys.path.insert(0, str(Path(__file__).parent))
 
 from music_scanner import get_db
 from bpm_analyzer import camelot_compatible

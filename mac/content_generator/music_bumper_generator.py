@@ -46,7 +46,7 @@ def generate_bumper(show_id: str, caption: str, bumper_dir: Path) -> bool:
     output_path = bumper_dir / f"{filename}.flac"
 
     # Short duration: 5-30 seconds depending on caption hints
-    if "jingle" in caption.lower() or "ident" in caption.lower() or "ID" in caption:
+    if "jingle" in caption.lower() or "ident" in caption.lower() or "id" in caption.lower():
         duration = random.uniform(5, 10)
     elif "transition" in caption.lower() or "sweep" in caption.lower() or "riser" in caption.lower():
         duration = random.uniform(3, 8)
