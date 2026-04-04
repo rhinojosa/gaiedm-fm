@@ -1,5 +1,5 @@
 #!/bin/bash
-# WRIT-FM Operator - Launch Claude Code for maintenance
+# Deep House Radio Operator - Launch Claude Code for maintenance
 # Run manually, via cron, or from mac/operator_daemon.sh.
 
 set -euo pipefail

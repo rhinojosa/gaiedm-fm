@@ -1,89 +1,56 @@
 timezone: local
 
-# WRIT-FM Talk Show Schedule
-# Talk-first format: 10-20 minute segments with 1-2 minute music breaks.
+# Deep House & Progressive House Radio Station
+# Music-first format: continuous DJ-mixed tracks with short DJ interjections.
 
 shows:
-  midnight_signal:
-    name: "Midnight Signal"
-    description: "Philosophy, memory, and the transmissions that only come through after midnight."
-    host: "liminal_operator"
-    topic_focus: "philosophy"
-    segment_types: ["deep_dive", "story", "interview", "listener_mailbag"]
-    bumper_style: "ambient"
+  the_deep:
+    name: "The Deep"
+    description: "Warm, melodic deep house. Anjunadeep vibes — Lane 8, Ben Böhmer, Yotto, Tinlicker, Rufus Du Sol."
+    host: "dj_cascade"
+    topic_focus: "melodic_house"
+    segment_types: ["track_intro", "set_intro", "set_outro", "artist_spotlight", "festival_update", "station_id"]
+    bumper_style: "deep_house"
+    bpm_range: [118, 124]
+    music_genres: ["deep house", "melodic house", "organic house"]
+    crossfade_beats: 32
+    dj_frequency: 4          # DJ speaks every N tracks
+    anthem_enabled: true
+    anthem_frequency: 4       # play anthem every N tracks
     voices:
       host: "am_michael"
 
-  the_night_garden:
-    name: "The Night Garden"
-    description: "Dreams, darkness, and the things that bloom when no one is watching."
-    host: "nyx"
-    topic_focus: "night_philosophy"
-    segment_types: ["deep_dive", "story", "interview"]
-    bumper_style: "ambient"
-    voices:
-      host: "af_heart"
-
-  dawn_chorus:
-    name: "Dawn Chorus"
-    description: "Morning reflections. The world rewrites itself at sunrise."
-    host: "liminal_operator"
-    topic_focus: "philosophy"
-    segment_types: ["deep_dive", "music_essay", "story"]
-    bumper_style: "jazz"
-    voices:
-      host: "am_michael"
-
-  sonic_archaeology:
-    name: "Sonic Archaeology"
-    description: "Deep cuts, lost sessions, genre genealogy, and the music they forgot to remember."
-    host: "dr_resonance"
-    topic_focus: "music_history"
-    segment_types: ["deep_dive", "music_essay", "interview"]
-    bumper_style: "jazz"
-    voices:
-      host: "bm_daniel"
-
-  signal_report:
-    name: "Signal Report"
-    description: "Current events decoded. The news behind the news, through a late-night lens."
-    host: "signal"
-    topic_focus: "current_events"
-    segment_types: ["news_analysis", "deep_dive", "panel"]
-    bumper_style: "downtempo"
+  frequencies:
+    name: "Frequencies"
+    description: "Dark, hypnotic progressive house. Digweed, Sasha, Deep Dish, Hernan Cattaneo, Guy J."
+    host: "dj_echo"
+    topic_focus: "progressive_house"
+    segment_types: ["track_intro", "set_intro", "set_outro", "artist_spotlight", "station_id"]
+    bumper_style: "progressive"
+    bpm_range: [122, 128]
+    music_genres: ["progressive house", "dark progressive", "melodic techno"]
+    crossfade_beats: 32
+    dj_frequency: 6          # less talk, let the music breathe
+    anthem_enabled: true
+    anthem_frequency: 4
     voices:
       host: "am_onyx"
 
-  the_groove_lab:
-    name: "The Groove Lab"
-    description: "Soul, funk, and the feeling of feeling something. Music as food."
-    host: "ember"
-    topic_focus: "soul_music"
-    segment_types: ["deep_dive", "music_essay", "story"]
-    bumper_style: "soul"
+  anthem_hour:
+    name: "Anthem Hour"
+    description: "Peak-time anthems and festival energy. Prydz, Deadmau5, Above & Beyond, CamelPhat, Artbat."
+    host: "dj_neon"
+    topic_focus: "anthems"
+    segment_types: ["track_intro", "set_intro", "set_outro", "anthem_announce", "festival_update", "station_id"]
+    bumper_style: "anthem"
+    bpm_range: [124, 130]
+    music_genres: ["progressive house", "melodic techno", "trance"]
+    crossfade_beats: 16       # tighter transitions for high energy
+    dj_frequency: 3           # more hype, more talk
+    anthem_enabled: true
+    anthem_frequency: 1       # every track is anthem-tier
     voices:
       host: "af_bella"
-
-  crosswire:
-    name: "Crosswire"
-    description: "Two voices, one topic. Where ideas collide and sparks fly."
-    host: "dr_resonance"
-    topic_focus: "culture"
-    segment_types: ["panel", "deep_dive", "interview"]
-    bumper_style: "indie"
-    voices:
-      host: "bm_daniel"
-      guest: "af_bella"
-
-  listener_hours:
-    name: "Listener Hours"
-    description: "Your messages, your questions, your frequency. The mailbag opens."
-    host: "liminal_operator"
-    topic_focus: "listeners"
-    segment_types: ["listener_mailbag", "deep_dive", "story"]
-    bumper_style: "soul"
-    voices:
-      host: "am_michael"
 
 
 # Weekly schedule.
@@ -92,38 +59,29 @@ shows:
 schedule:
   base:
     - start: "00:00"
-      end: "04:00"
-      show: "midnight_signal"
-    - start: "04:00"
       end: "06:00"
-      show: "the_night_garden"
+      show: "the_deep"
     - start: "06:00"
-      end: "09:00"
-      show: "dawn_chorus"
-    - start: "09:00"
       end: "12:00"
-      show: "sonic_archaeology"
+      show: "the_deep"
     - start: "12:00"
-      end: "14:00"
-      show: "signal_report"
-    - start: "14:00"
-      end: "16:00"
-      show: "the_groove_lab"
-    - start: "16:00"
       end: "18:00"
-      show: "crosswire"
+      show: "frequencies"
     - start: "18:00"
-      end: "20:00"
-      show: "sonic_archaeology"
-    - start: "20:00"
       end: "22:00"
-      show: "the_groove_lab"
+      show: "anthem_hour"
     - start: "22:00"
       end: "00:00"
-      show: "the_night_garden"
+      show: "frequencies"
 
   overrides:
+    # Friday & Saturday late night = Frequencies (underground feel)
+    - days: ["fri", "sat"]
+      start: "00:00"
+      end: "06:00"
+      show: "frequencies"
+    # Sunday afternoon = The Deep (chill recovery)
     - days: ["sun"]
-      start: "18:00"
-      end: "20:00"
-      show: "listener_hours"
+      start: "12:00"
+      end: "18:00"
+      show: "the_deep"

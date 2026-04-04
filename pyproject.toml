@@ -1,7 +1,7 @@
 [project]
-name = "writ-radio"
-version = "0.1.0"
-description = "WRIT-FM: 24/7 AI Radio Station with The Liminal Operator"
+name = "deep-house-radio"
+version = "0.2.0"
+description = "Deep House Radio: 24/7 DJ-mixed deep house & progressive house with AI DJ dialogue"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27.0",
@@ -27,6 +27,8 @@ dependencies = [
     "omegaconf>=2.3.0",
     "torchcodec>=0.9.1",
     "qrcode>=8.0",
+    "soundcloud-v2>=1.5.0",
+    "yt-dlp>=2024.0.0",
 ]
 
 [project.optional-dependencies]

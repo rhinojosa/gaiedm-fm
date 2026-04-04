@@ -1,29 +1,38 @@
-# WRIT-FM Configuration
+# Deep House Radio Configuration
 # Copy this file to config.yaml and customize for your setup
 
 # Music sources - directories containing audio files (mp3, flac, m4a, wav)
-# The streamer scans these recursively
+# Organize by show for automatic show assignment:
+#   ~/Music/the_deep/        -> assigned to "The Deep"
+#   ~/Music/frequencies/     -> assigned to "Frequencies"
+#   ~/Music/anthem_hour/     -> assigned to "Anthem Hour"
+# Or put everything in one dir — the scanner will use genre/BPM to sort
 music_sources:
   - ~/Music
   - /path/to/more/music
 
-# Voice reference for TTS cloning (Chatterbox)
-# A 10-30 second WAV file of the voice you want to clone
-voice_reference: ./voice_reference/operator_voice.wav
+# SoundCloud integration (optional, supplementary source)
+soundcloud:
+  # OAuth token (get from browser cookies on soundcloud.com)
+  # Or store in ~/.writ/soundcloud_token
+  # token: "your-oauth-token-here"
+  enabled: true
+  download_dir: output/soundcloud
 
-# LLM settings (for Claude CLI or LM Studio)
-# Used by content generators to write DJ scripts
+# LLM settings (for Claude CLI DJ dialogue scripts)
 llm:
-  base_url: http://localhost:1234/v1  # LM Studio default
   timeout: 60
   temperature: 0.8
   max_tokens: 300
 
-# Chatterbox TTS settings
+# Kokoro TTS settings (for DJ voice)
 tts:
-  exaggeration: 0.5   # Voice expressiveness (0-1)
-  cfg_weight: 0.5     # Classifier-free guidance
-  temperature: 0.8    # Sampling temperature
+  engine: kokoro    # kokoro or chatterbox
+  # Chatterbox-specific (if using voice cloning):
+  # voice_reference: ./voice_reference/dj_voice.wav
+  # exaggeration: 0.5
+  # cfg_weight: 0.5
+  # temperature: 0.8
 
 # Icecast streaming server
 icecast:
@@ -32,14 +41,11 @@ icecast:
   mount: /stream
   source_password: YOUR_SOURCE_PASSWORD  # Must match icecast.xml
 
-# Cloudflare tunnel (optional - for public streaming)
-# tunnel:
-#   name: your-tunnel-name
-
 # API server for now-playing info
 api:
   port: 8001
 
 # Content generation
 generation:
-  segments_ahead: 10  # Keep this many segments ready
+  dj_segments_min: 6      # Keep this many DJ segments ready per show
+  bumpers_min: 5           # Keep this many bumpers/jingles per show

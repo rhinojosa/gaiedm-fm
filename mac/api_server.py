@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WRIT-FM Now Playing API
+Deep House Radio — Now Playing API
 
 HTTP server that exposes current track info, schedule, history, and more.
 Runs as a daemon thread inside the streamer process.
